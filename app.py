@@ -125,8 +125,9 @@ if PAYPAL_CURRENCY == "INR":
 INR_PER_USD = _env_float("INR_PER_USD", 83.0)
 if INR_PER_USD <= 0:
     INR_PER_USD = 83.0
-MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
-MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "quickbill").strip() or "quickbill"
+# Hardcoded Atlas connection (as requested).
+MONGODB_URI = "mongodb+srv://khushboobansal792_db_user:HSZ3tUPwaCxmuymF@cluster0.2iojd1s.mongodb.net/?retryWrites=true&w=majority"
+MONGODB_DB_NAME = "retail"
 LOW_STOCK_DEFAULT_THRESHOLD = _env_int("LOW_STOCK_DEFAULT_THRESHOLD", 10)
 CRITICAL_STOCK_DEFAULT_THRESHOLD = _env_int("CRITICAL_STOCK_DEFAULT_THRESHOLD", 3)
 LOW_STOCK_ALERT_COOLDOWN_MINUTES = _env_int("LOW_STOCK_ALERT_COOLDOWN_MINUTES", 180)
@@ -139,6 +140,8 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "quickbill-dev-secret")
 
 mongo_client: MongoClient | None = None
 mongo_db = None
+MONGO_META_COLLECTION = "app_metadata"
+MONGO_MIGRATION_META_ID = "local_file_migration_v1"
 
 
 def _init_mongodb() -> None:
@@ -1374,6 +1377,22 @@ def admin_dashboard():
         current_user=_current_user(),
         is_admin_authenticated=True,
     )
+
+
+@app.route("/admin/dashboard-data")
+def admin_dashboard_data():
+    if not _is_admin_authenticated():
+        return jsonify({"error": "Admin login required."}), 403
+
+    dashboard = _dashboard_context()
+    dashboard["open_alerts"] = [
+        alert for alert in dashboard["open_alerts"] if str(alert.get("status", "")).strip().lower() == "open"
+    ]
+    dashboard["open_alerts"].sort(
+        key=lambda alert: _parse_iso_datetime(alert.get("created_at", "")) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return jsonify({"dashboard": dashboard, "generated_at": _utc_now_iso()})
 
 
 @app.route("/admin/products/add", methods=["POST"])
