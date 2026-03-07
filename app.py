@@ -5,7 +5,7 @@ import csv
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib import error as urllib_error
@@ -35,11 +35,28 @@ except ImportError:
 
 BASE_DIR = Path(__file__).resolve().parent
 
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(str(os.getenv(name, default)).strip())
+    except (TypeError, ValueError):
+        return default
+
 # Canonical columns for each persisted table.
 TABLE_COLUMNS: dict[str, list[str]] = {
     "users": ["Name", "Phone Number"],
     "user_cart": ["cart_id", "product_id", "product_name", "quantity", "price", "total_cost"],
-    "products_database": ["product_id", "product_name", "stock_quantity", "price", "last_restock_date"],
+    "products_database": [
+        "product_id",
+        "product_name",
+        "stock_quantity",
+        "price",
+        "last_restock_date",
+        "reorder_level",
+        "critical_level",
+        "last_low_stock_alert_at",
+        "last_low_stock_alert_level",
+    ],
     "store_sales": [
         "transaction_id",
         "customer_name",
@@ -50,6 +67,33 @@ TABLE_COLUMNS: dict[str, list[str]] = {
         "payment_order_id",
         "payment_id",
         "status",
+    ],
+    "inventory_alerts": [
+        "alert_id",
+        "product_id",
+        "product_name",
+        "stock_quantity",
+        "reorder_level",
+        "critical_level",
+        "severity",
+        "status",
+        "notification_channel",
+        "notification_status",
+        "notification_error",
+        "transaction_id",
+        "created_at",
+        "resolved_at",
+    ],
+    "inventory_movements": [
+        "movement_id",
+        "product_id",
+        "product_name",
+        "movement_type",
+        "quantity_change",
+        "stock_before",
+        "stock_after",
+        "related_transaction_id",
+        "created_at",
     ],
 }
 
@@ -66,6 +110,11 @@ PAYPAL_BASE_URL = os.getenv("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com
 PAYMENT_CURRENCY = os.getenv("PAYMENT_CURRENCY", "USD").strip().upper() or "USD"
 MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "quickbill").strip() or "quickbill"
+LOW_STOCK_DEFAULT_THRESHOLD = _env_int("LOW_STOCK_DEFAULT_THRESHOLD", 10)
+CRITICAL_STOCK_DEFAULT_THRESHOLD = _env_int("CRITICAL_STOCK_DEFAULT_THRESHOLD", 3)
+LOW_STOCK_ALERT_COOLDOWN_MINUTES = _env_int("LOW_STOCK_ALERT_COOLDOWN_MINUTES", 180)
+TELEGRAM_BOT_TOKEN = "8541759344:AAFhR2fS1s8OQiOeNmgRDKj91Nc5c0jYthU"
+TELEGRAM_ADMIN_CHAT_ID = "2092635206"
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "quickbill-dev-secret")
@@ -232,6 +281,29 @@ def _normalize_phone(phone: str) -> str:
     return "".join(ch for ch in phone if ch.isdigit())
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat(timespec="seconds")
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 # ---------- Domain helpers (products/cart) ----------
 def _canonical_product_row(row: dict[str, Any]) -> dict[str, Any] | None:
     product_id = str(_find_value(row, PRODUCT_IMPORT_COLUMNS["product_id"], "")).strip()
@@ -242,6 +314,19 @@ def _canonical_product_row(row: dict[str, Any]) -> dict[str, Any] | None:
     stock_quantity = _to_int(_find_value(row, PRODUCT_IMPORT_COLUMNS["stock_quantity"], 0), 0)
     price = round(_to_float(_find_value(row, PRODUCT_IMPORT_COLUMNS["price"], 0.0), 0.0), 2)
     restock_date = str(row.get("last_restock_date", "")).strip()
+    reorder_level = _to_int(row.get("reorder_level", LOW_STOCK_DEFAULT_THRESHOLD), LOW_STOCK_DEFAULT_THRESHOLD)
+    critical_level = _to_int(
+        row.get("critical_level", min(CRITICAL_STOCK_DEFAULT_THRESHOLD, reorder_level)),
+        min(CRITICAL_STOCK_DEFAULT_THRESHOLD, reorder_level),
+    )
+    if reorder_level < 0:
+        reorder_level = LOW_STOCK_DEFAULT_THRESHOLD
+    if critical_level < 0:
+        critical_level = min(CRITICAL_STOCK_DEFAULT_THRESHOLD, reorder_level)
+    if critical_level > reorder_level:
+        critical_level = reorder_level
+    last_low_stock_alert_at = str(row.get("last_low_stock_alert_at", "")).strip()
+    last_low_stock_alert_level = str(row.get("last_low_stock_alert_level", "")).strip().lower()
 
     return {
         "product_id": product_id,
@@ -249,6 +334,10 @@ def _canonical_product_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "stock_quantity": stock_quantity,
         "price": price,
         "last_restock_date": restock_date,
+        "reorder_level": reorder_level,
+        "critical_level": critical_level,
+        "last_low_stock_alert_at": last_low_stock_alert_at,
+        "last_low_stock_alert_level": last_low_stock_alert_level,
     }
 
 
@@ -274,7 +363,7 @@ def _bootstrap_products_table() -> None:
 
 
 def _ensure_tables() -> None:
-    for table_name in ("users", "user_cart", "store_sales"):
+    for table_name in ("users", "user_cart", "store_sales", "inventory_alerts", "inventory_movements"):
         table_xlsx, table_csv = _table_paths(table_name)
         if OPENPYXL_AVAILABLE:
             if not table_xlsx.exists() and not table_csv.exists():
@@ -305,6 +394,331 @@ def _load_products() -> list[dict[str, Any]]:
                 products.append(canonical)
 
     return products
+
+
+def _save_products(products: list[dict[str, Any]]) -> None:
+    rows: list[dict[str, Any]] = []
+    for product in products:
+        canonical = _canonical_product_row(product)
+        if canonical is not None:
+            rows.append(canonical)
+    _write_table("products_database", rows)
+
+
+def _product_lookup_key(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _build_product_index(products: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+    for product in products:
+        product_id = _product_lookup_key(product.get("product_id"))
+        product_name = _product_lookup_key(product.get("product_name"))
+        if product_id:
+            index[product_id] = product
+        if product_name:
+            index[product_name] = product
+    return index
+
+
+def _stock_alert_severity(product: dict[str, Any]) -> str:
+    stock_quantity = _to_int(product.get("stock_quantity", 0), 0)
+    reorder_level = _to_int(product.get("reorder_level", LOW_STOCK_DEFAULT_THRESHOLD), LOW_STOCK_DEFAULT_THRESHOLD)
+    critical_level = _to_int(
+        product.get("critical_level", min(CRITICAL_STOCK_DEFAULT_THRESHOLD, reorder_level)),
+        min(CRITICAL_STOCK_DEFAULT_THRESHOLD, reorder_level),
+    )
+    if stock_quantity <= critical_level:
+        return "critical"
+    if stock_quantity <= reorder_level:
+        return "low"
+    return ""
+
+
+def _send_admin_telegram_notification(message: str) -> tuple[str, str]:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_ADMIN_CHAT_ID:
+        return "skipped", "Telegram is not configured."
+
+    payload = json.dumps({"chat_id": TELEGRAM_ADMIN_CHAT_ID, "text": message}).encode("utf-8")
+    notification_request = urllib_request.Request(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib_request.urlopen(notification_request, timeout=10) as response:
+            response_body = response.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        error_text = exc.read().decode("utf-8", errors="ignore")
+        return "failed", error_text or str(exc.reason)
+    except urllib_error.URLError as exc:
+        return "failed", str(exc.reason)
+
+    try:
+        response_payload = json.loads(response_body)
+    except json.JSONDecodeError:
+        response_payload = {}
+
+    if response_payload.get("ok") is False:
+        description = str(response_payload.get("description", "Unknown Telegram error")).strip()
+        return "failed", description
+
+    return "sent", ""
+
+
+def _resolve_open_inventory_alerts(
+    alert_rows: list[dict[str, Any]],
+    product_id: str,
+    resolved_at: str,
+) -> bool:
+    changed = False
+    product_key = _product_lookup_key(product_id)
+    for alert in alert_rows:
+        if _product_lookup_key(alert.get("product_id")) != product_key:
+            continue
+        if str(alert.get("status", "")).strip().lower() != "open":
+            continue
+        alert["status"] = "resolved"
+        alert["resolved_at"] = resolved_at
+        changed = True
+    return changed
+
+
+def _record_inventory_movement(
+    movement_rows: list[dict[str, Any]],
+    product: dict[str, Any],
+    quantity_change: int,
+    stock_before: int,
+    stock_after: int,
+    movement_type: str,
+    transaction_id: str,
+) -> None:
+    movement_rows.append(
+        {
+            "movement_id": f"MOV-{uuid.uuid4().hex[:10].upper()}",
+            "product_id": product.get("product_id", ""),
+            "product_name": product.get("product_name", "Unknown Item"),
+            "movement_type": movement_type,
+            "quantity_change": quantity_change,
+            "stock_before": stock_before,
+            "stock_after": stock_after,
+            "related_transaction_id": transaction_id,
+            "created_at": _utc_now_iso(),
+        }
+    )
+
+
+def _should_send_low_stock_alert(product: dict[str, Any], severity: str) -> bool:
+    if not severity:
+        return False
+
+    last_level = str(product.get("last_low_stock_alert_level", "")).strip().lower()
+    if severity != last_level:
+        return True
+
+    last_sent_at = _parse_iso_datetime(product.get("last_low_stock_alert_at", ""))
+    if last_sent_at is None:
+        return True
+
+    cooldown = timedelta(minutes=max(LOW_STOCK_ALERT_COOLDOWN_MINUTES, 0))
+    return (_utc_now() - last_sent_at) >= cooldown
+
+
+def _append_low_stock_alert(
+    alert_rows: list[dict[str, Any]],
+    product: dict[str, Any],
+    severity: str,
+    transaction_id: str,
+) -> dict[str, Any]:
+    message = (
+        f"{severity.upper()} stock alert\n"
+        f"Product: {product.get('product_name', 'Unknown Item')}\n"
+        f"ID: {product.get('product_id', '')}\n"
+        f"Stock left: {_to_int(product.get('stock_quantity', 0), 0)}\n"
+        f"Reorder level: {_to_int(product.get('reorder_level', LOW_STOCK_DEFAULT_THRESHOLD), LOW_STOCK_DEFAULT_THRESHOLD)}\n"
+        f"Critical level: {_to_int(product.get('critical_level', CRITICAL_STOCK_DEFAULT_THRESHOLD), CRITICAL_STOCK_DEFAULT_THRESHOLD)}\n"
+        f"Transaction: {transaction_id}"
+    )
+    notification_status, notification_error = _send_admin_telegram_notification(message)
+    alert_row = {
+        "alert_id": f"ALT-{uuid.uuid4().hex[:10].upper()}",
+        "product_id": product.get("product_id", ""),
+        "product_name": product.get("product_name", "Unknown Item"),
+        "stock_quantity": _to_int(product.get("stock_quantity", 0), 0),
+        "reorder_level": _to_int(product.get("reorder_level", LOW_STOCK_DEFAULT_THRESHOLD), LOW_STOCK_DEFAULT_THRESHOLD),
+        "critical_level": _to_int(
+            product.get("critical_level", CRITICAL_STOCK_DEFAULT_THRESHOLD),
+            CRITICAL_STOCK_DEFAULT_THRESHOLD,
+        ),
+        "severity": severity,
+        "status": "open",
+        "notification_channel": "telegram",
+        "notification_status": notification_status,
+        "notification_error": notification_error,
+        "transaction_id": transaction_id,
+        "created_at": _utc_now_iso(),
+        "resolved_at": "",
+    }
+    alert_rows.append(alert_row)
+    return alert_row
+
+
+def _validate_cart_inventory(items: list[dict[str, Any]]) -> str | None:
+    products = _load_products()
+    product_index = _build_product_index(products)
+    requested_by_product: dict[str, int] = {}
+
+    for item in items:
+        lookup_key = _product_lookup_key(item.get("product_id")) or _product_lookup_key(item.get("name"))
+        if not lookup_key:
+            continue
+        requested_by_product[lookup_key] = requested_by_product.get(lookup_key, 0) + _to_int(item.get("quantity", 0), 0)
+
+    errors: list[str] = []
+    for lookup_key, requested_quantity in requested_by_product.items():
+        product = product_index.get(lookup_key)
+        if product is None:
+            errors.append(f"Product {lookup_key} is no longer available.")
+            continue
+
+        stock_quantity = _to_int(product.get("stock_quantity", 0), 0)
+        if requested_quantity > stock_quantity:
+            errors.append(
+                f"{product.get('product_name', lookup_key)} has only {stock_quantity} unit(s) left."
+            )
+
+    if errors:
+        return " ".join(errors)
+    return None
+
+
+def _update_inventory_after_sale(items: list[dict[str, Any]], transaction_id: str) -> list[dict[str, Any]]:
+    products = _load_products()
+    product_index = _build_product_index(products)
+    alert_rows = _read_table("inventory_alerts")
+    movement_rows = _read_table("inventory_movements")
+    triggered_alerts: list[dict[str, Any]] = []
+    alerts_changed = False
+
+    for item in items:
+        lookup_key = _product_lookup_key(item.get("product_id")) or _product_lookup_key(item.get("name"))
+        product = product_index.get(lookup_key)
+        if product is None:
+            print(f"[inventory] Product missing during stock deduction: {item.get('product_id') or item.get('name')}")
+            continue
+
+        quantity = max(_to_int(item.get("quantity", 0), 0), 0)
+        stock_before = _to_int(product.get("stock_quantity", 0), 0)
+        stock_after = max(stock_before - quantity, 0)
+        product["stock_quantity"] = stock_after
+
+        _record_inventory_movement(
+            movement_rows=movement_rows,
+            product=product,
+            quantity_change=-quantity,
+            stock_before=stock_before,
+            stock_after=stock_after,
+            movement_type="sale",
+            transaction_id=transaction_id,
+        )
+
+        severity = _stock_alert_severity(product)
+        if severity and _should_send_low_stock_alert(product, severity):
+            triggered_alerts.append(_append_low_stock_alert(alert_rows, product, severity, transaction_id))
+            alerts_changed = True
+            product["last_low_stock_alert_at"] = _utc_now_iso()
+            product["last_low_stock_alert_level"] = severity
+        elif not severity:
+            if _resolve_open_inventory_alerts(alert_rows, str(product.get("product_id", "")), _utc_now_iso()):
+                alerts_changed = True
+            product["last_low_stock_alert_at"] = ""
+            product["last_low_stock_alert_level"] = ""
+        elif not str(product.get("last_low_stock_alert_level", "")).strip():
+            product["last_low_stock_alert_at"] = ""
+            product["last_low_stock_alert_level"] = ""
+
+    _save_products(products)
+    _write_table("inventory_movements", movement_rows)
+    if alerts_changed:
+        _write_table("inventory_alerts", alert_rows)
+
+    return triggered_alerts
+
+
+def _build_inventory_insights(window_days: int = 30) -> dict[str, Any]:
+    products = _load_products()
+    alerts = _read_table("inventory_alerts")
+    movements = _read_table("inventory_movements")
+    cutoff = _utc_now() - timedelta(days=max(window_days, 1))
+    sales_by_product: dict[str, int] = {}
+
+    for movement in movements:
+        if str(movement.get("movement_type", "")).strip().lower() != "sale":
+            continue
+        created_at = _parse_iso_datetime(movement.get("created_at", ""))
+        if created_at is None or created_at < cutoff:
+            continue
+        product_id = _product_lookup_key(movement.get("product_id"))
+        quantity_sold = abs(_to_int(movement.get("quantity_change", 0), 0))
+        sales_by_product[product_id] = sales_by_product.get(product_id, 0) + quantity_sold
+
+    product_metrics: list[dict[str, Any]] = []
+    low_stock_items: list[dict[str, Any]] = []
+    for product in products:
+        product_id = _product_lookup_key(product.get("product_id"))
+        sold_quantity = sales_by_product.get(product_id, 0)
+        current_stock = _to_int(product.get("stock_quantity", 0), 0)
+        reorder_level = _to_int(product.get("reorder_level", LOW_STOCK_DEFAULT_THRESHOLD), LOW_STOCK_DEFAULT_THRESHOLD)
+        severity = _stock_alert_severity(product)
+        avg_daily_sales = round(sold_quantity / max(window_days, 1), 2)
+        stock_cover_days = round(current_stock / avg_daily_sales, 1) if avg_daily_sales > 0 else None
+
+        metric = {
+            "product_id": product.get("product_id", ""),
+            "product_name": product.get("product_name", "Unknown Item"),
+            "sold_quantity": sold_quantity,
+            "current_stock": current_stock,
+            "reorder_level": reorder_level,
+            "stock_cover_days": stock_cover_days,
+        }
+        product_metrics.append(metric)
+
+        if severity:
+            low_stock_items.append({**metric, "severity": severity})
+
+    fast_moving = [
+        item
+        for item in sorted(product_metrics, key=lambda item: item["sold_quantity"], reverse=True)
+        if item["sold_quantity"] > 0
+    ][:5]
+    slow_moving = [
+        item
+        for item in sorted(product_metrics, key=lambda item: (item["sold_quantity"], -item["current_stock"]))
+        if item["sold_quantity"] > 0 and item["current_stock"] > item["reorder_level"]
+    ][:5]
+    dead_stock = [
+        item
+        for item in sorted(product_metrics, key=lambda item: item["current_stock"], reverse=True)
+        if item["sold_quantity"] == 0 and item["current_stock"] > 0
+    ][:5]
+    open_alerts = [alert for alert in alerts if str(alert.get("status", "")).strip().lower() == "open"]
+    critical_count = sum(1 for item in low_stock_items if item["severity"] == "critical")
+
+    return {
+        "summary": {
+            "window_days": window_days,
+            "total_products": len(products),
+            "open_alerts": len(open_alerts),
+            "low_stock_count": len(low_stock_items),
+            "critical_stock_count": critical_count,
+        },
+        "fast_moving": fast_moving,
+        "slow_moving": slow_moving,
+        "dead_stock": dead_stock,
+        "low_stock": sorted(low_stock_items, key=lambda item: (item["severity"] != "critical", item["current_stock"])),
+    }
 
 
 def _load_cart_items() -> list[dict[str, Any]]:
@@ -362,7 +776,7 @@ def _cart_total(items: list[dict[str, Any]]) -> float:
 def _snapshot_cart_for_undo(items: list[dict[str, Any]]) -> None:
     session["undo_cart_snapshot"] = {
         "items": [dict(item) for item in items],
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "created_at": _utc_now_iso(),
     }
     session.modified = True
 
@@ -538,11 +952,13 @@ def _finalize_paypal_payment(order_id: str, capture: dict[str, Any]) -> None:
     customer_name = str(pending_payment.get("customer", {}).get("name", "Guest Customer"))
     items = pending_payment.get("items", [])
     items_bought = ", ".join(f"{item['name']} x{item['quantity']}" for item in items)
+    transaction_id = f"TXN-{uuid.uuid4().hex[:10].upper()}"
+    _update_inventory_after_sale(items, transaction_id)
 
     sales = _read_table("store_sales")
     sales.append(
         {
-            "transaction_id": f"TXN-{uuid.uuid4().hex[:10].upper()}",
+            "transaction_id": transaction_id,
             "customer_name": customer_name,
             "items_bought": items_bought,
             "total_amount": pending_payment.get("total_amount", 0.0),
@@ -585,6 +1001,31 @@ def customer():
 @app.route("/checkout-success")
 def checkout_success():
     return render_template("checkout_success.html")
+
+
+@app.route("/admin/inventory-alerts")
+def admin_inventory_alerts():
+    status_filter = str(request.args.get("status", "open")).strip().lower()
+    alerts = _read_table("inventory_alerts")
+    filtered_alerts = alerts
+    if status_filter and status_filter != "all":
+        filtered_alerts = [
+            alert
+            for alert in alerts
+            if str(alert.get("status", "")).strip().lower() == status_filter
+        ]
+
+    filtered_alerts.sort(
+        key=lambda alert: _parse_iso_datetime(alert.get("created_at", "")) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return jsonify({"alerts": filtered_alerts, "count": len(filtered_alerts), "status_filter": status_filter})
+  
+
+@app.route("/admin/inventory-insights")
+def admin_inventory_insights():
+    days = _to_int(request.args.get("days", 30), 30)
+    return jsonify(_build_inventory_insights(days))
 
 
 # ---------- Signup/session route ----------
@@ -677,12 +1118,24 @@ def add_item():
     if product_match is None:
         return jsonify({"error": f"Product {product_id} not found."}), 404
 
-    line_total = round(product_match["price"] * quantity, 2)
+    available_stock = _to_int(product_match.get("stock_quantity", 0), 0)
+    if available_stock <= 0:
+        return jsonify({"error": f"{product_match['product_name']} is out of stock."}), 400
+
     cart_items = _load_cart_items()
+    reserved_quantity = sum(
+        _to_int(item.get("quantity", 0), 0)
+        for item in cart_items
+        if _product_lookup_key(item.get("product_id")) == _product_lookup_key(product_match["product_id"])
+    )
+    if reserved_quantity + quantity > available_stock:
+        return jsonify({"error": f"Only {available_stock - reserved_quantity} unit(s) left for {product_match['product_name']}."}), 400
+
+    line_total = round(product_match["price"] * quantity, 2)
     cart_items.append(
         {
             "cart_id": str(payload.get("cart_id") or "default"),
-            "product_id": product_id,
+            "product_id": product_match["product_id"],
             "name": product_match["product_name"],
             "quantity": quantity,
             "price": product_match["price"],
@@ -772,6 +1225,10 @@ def checkout():
     if not items:
         return jsonify({"message": "Cart is empty. Add items before checkout."}), 400
 
+    inventory_error = _validate_cart_inventory(items)
+    if inventory_error:
+        return jsonify({"message": inventory_error}), 400
+
     total_amount = _cart_total(items)
     if total_amount <= 0:
         return jsonify({"message": "Cart total is zero. Cannot create payment order."}), 400
@@ -797,7 +1254,7 @@ def checkout():
         "currency": PAYMENT_CURRENCY,
         "customer": customer,
         "items": items,
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "created_at": _utc_now_iso(),
     }
     session.modified = True
 
@@ -815,6 +1272,14 @@ def paypal_return():
     order_id = str(request.args.get("token", "")).strip()
     if not order_id:
         return redirect(url_for("customer", payment_message="Missing PayPal order id."))
+
+    pending_payment = session.get("pending_payment")
+    if not pending_payment or not isinstance(pending_payment, dict):
+        return redirect(url_for("customer", payment_message="No pending payment found."))
+
+    inventory_error = _validate_cart_inventory(pending_payment.get("items", []))
+    if inventory_error:
+        return redirect(url_for("customer", payment_message=inventory_error))
 
     try:
         capture = _capture_paypal_order(order_id=order_id)
@@ -846,6 +1311,10 @@ def verify_payment():
 
     if order_id != pending_payment.get("order_id"):
         return jsonify({"message": "Order id mismatch for pending payment."}), 400
+
+    inventory_error = _validate_cart_inventory(pending_payment.get("items", []))
+    if inventory_error:
+        return jsonify({"message": inventory_error}), 400
 
     try:
         capture = _capture_paypal_order(order_id=order_id)
