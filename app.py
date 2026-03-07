@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import hmac
 import json
 import os
 import uuid
@@ -12,6 +13,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 
 try:
     from pymongo import MongoClient
@@ -44,7 +46,7 @@ def _env_int(name: str, default: int) -> int:
 
 # Canonical columns for each persisted table.
 TABLE_COLUMNS: dict[str, list[str]] = {
-    "users": ["Name", "Phone Number"],
+    "users": ["user_id", "Name", "Phone Number", "Email", "Password Hash", "Role", "created_at", "last_login_at"],
     "user_cart": ["cart_id", "product_id", "product_name", "quantity", "price", "total_cost"],
     "products_database": [
         "product_id",
@@ -115,6 +117,7 @@ CRITICAL_STOCK_DEFAULT_THRESHOLD = _env_int("CRITICAL_STOCK_DEFAULT_THRESHOLD", 
 LOW_STOCK_ALERT_COOLDOWN_MINUTES = _env_int("LOW_STOCK_ALERT_COOLDOWN_MINUTES", 180)
 TELEGRAM_BOT_TOKEN = "8541759344:AAFhR2fS1s8OQiOeNmgRDKj91Nc5c0jYthU"
 TELEGRAM_ADMIN_CHAT_ID = "2092635206"
+ADMIN_DASHBOARD_SECRET_KEY = "retail-admin-2026"
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "quickbill-dev-secret")
@@ -302,6 +305,151 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _canonical_user_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    name = str(_find_value(row, ("Name", "name", "full_name"), "")).strip()
+    phone = str(_find_value(row, ("Phone Number", "Mobile Number", "phone"), "")).strip()
+    email = str(_find_value(row, ("Email", "email"), "")).strip().lower()
+    password_hash = str(_find_value(row, ("Password Hash", "password_hash", "password"), "")).strip()
+    role = str(_find_value(row, ("Role", "role"), "customer")).strip().lower() or "customer"
+    created_at = str(_find_value(row, ("created_at", "Created At"), "")).strip()
+    last_login_at = str(_find_value(row, ("last_login_at", "Last Login At"), "")).strip()
+    user_id = str(_find_value(row, ("user_id", "User ID", "id"), "")).strip()
+
+    if not any((name, phone, email, password_hash)):
+        return None
+
+    if not user_id:
+        if email:
+            user_id = f"USR-{email}"
+        elif phone:
+            user_id = f"USR-{_normalize_phone(phone) or phone}"
+        else:
+            user_id = f"USR-{uuid.uuid4().hex[:10].upper()}"
+
+    if role not in {"customer", "admin"}:
+        role = "customer"
+
+    return {
+        "user_id": user_id,
+        "Name": name,
+        "Phone Number": phone,
+        "Email": email,
+        "Password Hash": password_hash,
+        "Role": role,
+        "created_at": created_at,
+        "last_login_at": last_login_at,
+    }
+
+
+def _load_users() -> list[dict[str, Any]]:
+    rows = _read_table("users")
+    users: list[dict[str, Any]] = []
+    for row in rows:
+        canonical = _canonical_user_row(row)
+        if canonical is not None:
+            users.append(canonical)
+    return users
+
+
+def _save_users(users: list[dict[str, Any]]) -> None:
+    rows: list[dict[str, Any]] = []
+    for user in users:
+        canonical = _canonical_user_row(user)
+        if canonical is not None:
+            rows.append(canonical)
+    _write_table("users", rows)
+
+
+def _find_user_by_email(email: str) -> dict[str, Any] | None:
+    normalized_email = str(email or "").strip().lower()
+    if not normalized_email:
+        return None
+    for user in _load_users():
+        if str(user.get("Email", "")).strip().lower() == normalized_email:
+            return user
+    return None
+
+
+def _password_matches(stored_password_hash: str, plain_password: str) -> bool:
+    stored = str(stored_password_hash or "").strip()
+    candidate = str(plain_password or "")
+    if not stored or not candidate:
+        return False
+    if stored == candidate:
+        return True
+    try:
+        return check_password_hash(stored, candidate)
+    except ValueError:
+        return False
+
+
+def _set_customer_session(name: str, phone: str, email: str = "") -> None:
+    session["customer"] = {"name": name, "phone": phone, "email": email}
+
+
+def _login_user_session(user: dict[str, Any]) -> None:
+    session["auth_user_id"] = user.get("user_id", "")
+    session["auth_email"] = user.get("Email", "")
+    session["auth_role"] = user.get("Role", "customer")
+    session["auth_name"] = user.get("Name", "")
+    session["admin"] = str(user.get("Role", "")).strip().lower() == "admin"
+    if not session["admin"]:
+        _set_customer_session(
+            name=str(user.get("Name", "")).strip(),
+            phone=str(user.get("Phone Number", "")).strip(),
+            email=str(user.get("Email", "")).strip(),
+        )
+    session.modified = True
+
+
+def _login_admin_session() -> None:
+    session["auth_user_id"] = "admin-local"
+    session["auth_email"] = "admin-local"
+    session["auth_role"] = "admin"
+    session["auth_name"] = "Admin"
+    session["admin"] = True
+    session.modified = True
+
+
+def _admin_secret_matches(secret_key: str) -> bool:
+    candidate = str(secret_key or "").strip()
+    expected = str(ADMIN_DASHBOARD_SECRET_KEY or "").strip()
+    if not candidate or not expected:
+        return False
+    return hmac.compare_digest(candidate, expected)
+
+
+def _is_admin_authenticated() -> bool:
+    return str(session.get("auth_role", "")).strip().lower() == "admin"
+
+
+def _current_user() -> dict[str, Any] | None:
+    role = str(session.get("auth_role", "")).strip().lower()
+    if role == "admin":
+        return {
+            "user_id": "admin-local",
+            "Name": "Admin",
+            "Email": "admin-local",
+            "Role": "admin",
+            "Phone Number": "",
+        }
+
+    email = str(session.get("auth_email", "")).strip().lower()
+    if email:
+        return _find_user_by_email(email)
+
+    customer = session.get("customer", {})
+    if isinstance(customer, dict) and any(customer.values()):
+        return {
+            "user_id": "",
+            "Name": str(customer.get("name", "")).strip(),
+            "Email": str(customer.get("email", "")).strip(),
+            "Role": "customer",
+            "Phone Number": str(customer.get("phone", "")).strip(),
+        }
+    return None
 
 
 # ---------- Domain helpers (products/cart) ----------
@@ -721,6 +869,69 @@ def _build_inventory_insights(window_days: int = 30) -> dict[str, Any]:
     }
 
 
+def _sorted_sales(limit: int = 10) -> list[dict[str, Any]]:
+    sales = _read_table("store_sales")
+    sales.sort(
+        key=lambda sale: _parse_iso_datetime(sale.get("date", "")) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return sales[:limit]
+
+
+def _dashboard_context() -> dict[str, Any]:
+    products = _load_products()
+    insights = _build_inventory_insights(30)
+    recent_sales = _sorted_sales(8)
+    users = _load_users()
+    total_revenue = round(sum(_to_float(sale.get("total_amount", 0.0), 0.0) for sale in _read_table("store_sales")), 2)
+
+    return {
+        "products": sorted(products, key=lambda product: str(product.get("product_name", "")).lower()),
+        "insights": insights,
+        "recent_sales": recent_sales,
+        "total_revenue": total_revenue,
+        "registered_users": len([user for user in users if str(user.get("Role", "")).strip().lower() == "customer"]),
+        "open_alerts": _read_table("inventory_alerts"),
+    }
+
+
+def _add_product_record(
+    product_id: str,
+    product_name: str,
+    stock_quantity: int,
+    price: float,
+    reorder_level: int,
+    critical_level: int,
+) -> str | None:
+    products = _load_products()
+    normalized_product_id = _product_lookup_key(product_id)
+    normalized_name = _product_lookup_key(product_name)
+
+    for product in products:
+        if _product_lookup_key(product.get("product_id")) == normalized_product_id:
+            return f"Product id {product_id} already exists."
+        if _product_lookup_key(product.get("product_name")) == normalized_name:
+            return f"Product {product_name} already exists."
+
+    reorder_level = max(reorder_level, 0)
+    critical_level = max(min(critical_level, reorder_level), 0)
+    products.append(
+        {
+            "product_id": product_id,
+            "product_name": product_name,
+            "stock_quantity": max(stock_quantity, 0),
+            "price": round(price, 2),
+            "last_restock_date": _utc_now_iso(),
+            "reorder_level": reorder_level,
+            "critical_level": critical_level,
+            "last_low_stock_alert_at": "",
+            "last_low_stock_alert_level": "",
+        }
+    )
+    _save_products(products)
+    return None
+
+
 def _load_cart_items() -> list[dict[str, Any]]:
     rows = _read_table("user_cart")
     items: list[dict[str, Any]] = []
@@ -980,12 +1191,100 @@ def _finalize_paypal_payment(order_id: str, capture: dict[str, Any]) -> None:
 # ---------- Page routes ----------
 @app.route("/")
 def index():
-    return render_template("app.html")
+    return render_template(
+        "app.html",
+        current_user=_current_user(),
+        is_admin_authenticated=_is_admin_authenticated(),
+    )
 
 
 @app.route("/form")
 def form():
-    return render_template("form.html")
+    return render_template(
+        "form.html",
+        current_user=_current_user(),
+        is_admin_authenticated=_is_admin_authenticated(),
+    )
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if _is_admin_authenticated():
+        return redirect(url_for("admin_dashboard"))
+    if str(session.get("auth_role", "")).strip().lower() == "customer":
+        return redirect(url_for("customer"))
+
+    error_message = ""
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        user = _find_user_by_email(email)
+        if user is None or not _password_matches(str(user.get("Password Hash", "")), password):
+            error_message = "Invalid user email or password."
+        else:
+            users = _load_users()
+            for row in users:
+                if str(row.get("user_id", "")).strip() == str(user.get("user_id", "")).strip():
+                    row["last_login_at"] = _utc_now_iso()
+                    user = row
+                    break
+            _save_users(users)
+            session.clear()
+            _login_user_session(user)
+            return redirect(url_for("customer"))
+
+    return render_template(
+        "login.html",
+        error_message=error_message,
+        current_user=_current_user(),
+        is_admin_authenticated=_is_admin_authenticated(),
+    )
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    error_message = ""
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        phone = request.form.get("phone", "").strip()
+        password = request.form.get("password", "")
+
+        if not name or not email or not password:
+            error_message = "Name, email, and password are required."
+        elif _find_user_by_email(email) is not None:
+            error_message = "An account with this email already exists."
+        else:
+            users = _load_users()
+            new_user = {
+                "user_id": f"USR-{uuid.uuid4().hex[:10].upper()}",
+                "Name": name,
+                "Phone Number": phone,
+                "Email": email,
+                "Password Hash": generate_password_hash(password),
+                "Role": "customer",
+                "created_at": _utc_now_iso(),
+                "last_login_at": "",
+            }
+            users.append(new_user)
+            _save_users(users)
+            session.clear()
+            _login_user_session(new_user)
+            return redirect(url_for("customer"))
+
+    return render_template(
+        "register.html",
+        error_message=error_message,
+        current_user=_current_user(),
+        is_admin_authenticated=_is_admin_authenticated(),
+    )
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("index"))
 
 
 @app.route("/customer")
@@ -995,16 +1294,94 @@ def customer():
         paypal_client_id=PAYPAL_CLIENT_ID,
         payment_currency=PAYMENT_CURRENCY,
         payment_message=request.args.get("payment_message", "").strip(),
+        current_user=_current_user(),
+        is_admin_authenticated=_is_admin_authenticated(),
     )
 
 
 @app.route("/checkout-success")
 def checkout_success():
-    return render_template("checkout_success.html")
+    return render_template(
+        "checkout_success.html",
+        current_user=_current_user(),
+        is_admin_authenticated=_is_admin_authenticated(),
+    )
+
+
+@app.route("/admin-access")
+def admin_access():
+    secret_key = str(request.args.get("key", "")).strip()
+    if not _admin_secret_matches(secret_key):
+        return redirect(url_for("index"))
+
+    session.clear()
+    _login_admin_session()
+    return redirect(url_for("admin_dashboard"))
+
+
+@app.route("/admin-dashboard")
+def admin_dashboard():
+    secret_key = str(request.args.get("key", "")).strip()
+    if not _is_admin_authenticated() and _admin_secret_matches(secret_key):
+        session.clear()
+        _login_admin_session()
+
+    if not _is_admin_authenticated():
+        return redirect(url_for("index"))
+
+    dashboard = _dashboard_context()
+    dashboard["open_alerts"] = [
+        alert for alert in dashboard["open_alerts"] if str(alert.get("status", "")).strip().lower() == "open"
+    ]
+    dashboard["open_alerts"].sort(
+        key=lambda alert: _parse_iso_datetime(alert.get("created_at", "")) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return render_template(
+        "admin_dashboard.html",
+        dashboard=dashboard,
+        message=request.args.get("message", "").strip(),
+        current_user=_current_user(),
+        is_admin_authenticated=True,
+    )
+
+
+@app.route("/admin/products/add", methods=["POST"])
+def admin_add_product():
+    if not _is_admin_authenticated():
+        return redirect(url_for("index"))
+
+    product_id = request.form.get("product_id", "").strip()
+    product_name = request.form.get("product_name", "").strip()
+    stock_quantity = _to_int(request.form.get("stock_quantity", 0), 0)
+    price = _to_float(request.form.get("price", 0.0), 0.0)
+    reorder_level = _to_int(request.form.get("reorder_level", LOW_STOCK_DEFAULT_THRESHOLD), LOW_STOCK_DEFAULT_THRESHOLD)
+    critical_level = _to_int(
+        request.form.get("critical_level", min(CRITICAL_STOCK_DEFAULT_THRESHOLD, reorder_level)),
+        min(CRITICAL_STOCK_DEFAULT_THRESHOLD, reorder_level),
+    )
+
+    if not product_id or not product_name:
+        return redirect(url_for("admin_dashboard", message="Product id and name are required."))
+
+    error_message = _add_product_record(
+        product_id=product_id,
+        product_name=product_name,
+        stock_quantity=stock_quantity,
+        price=price,
+        reorder_level=reorder_level,
+        critical_level=critical_level,
+    )
+    if error_message:
+        return redirect(url_for("admin_dashboard", message=error_message))
+
+    return redirect(url_for("admin_dashboard", message="Product added successfully."))
 
 
 @app.route("/admin/inventory-alerts")
 def admin_inventory_alerts():
+    if not _is_admin_authenticated():
+        return jsonify({"error": "Admin login required."}), 403
     status_filter = str(request.args.get("status", "open")).strip().lower()
     alerts = _read_table("inventory_alerts")
     filtered_alerts = alerts
@@ -1024,6 +1401,8 @@ def admin_inventory_alerts():
 
 @app.route("/admin/inventory-insights")
 def admin_inventory_insights():
+    if not _is_admin_authenticated():
+        return jsonify({"error": "Admin login required."}), 403
     days = _to_int(request.args.get("days", 30), 30)
     return jsonify(_build_inventory_insights(days))
 
@@ -1037,21 +1416,40 @@ def submit_form():
     if not name or not phone:
         return "Name and phone number are required.", 400
 
-    users = _read_table("users")
+    users = _load_users()
     input_phone = _normalize_phone(phone)
+    matched_user: dict[str, Any] | None = None
 
-    duplicate_found = False
     for row in users:
-        existing_phone = str(_find_value(row, ("Phone Number", "Mobile Number", "phone"), "")).strip()
+        existing_phone = str(row.get("Phone Number", "")).strip()
         if input_phone and _normalize_phone(existing_phone) == input_phone:
-            duplicate_found = True
+            matched_user = row
             break
 
-    if not duplicate_found:
-        users.append({"Name": name, "Phone Number": phone})
-        _write_table("users", users)
+    if matched_user is None:
+        matched_user = {
+            "user_id": f"USR-{uuid.uuid4().hex[:10].upper()}",
+            "Name": name,
+            "Phone Number": phone,
+            "Email": "",
+            "Password Hash": "",
+            "Role": "customer",
+            "created_at": _utc_now_iso(),
+            "last_login_at": "",
+        }
+        users.append(matched_user)
+    else:
+        if not str(matched_user.get("Name", "")).strip():
+            matched_user["Name"] = name
+        if not str(matched_user.get("Phone Number", "")).strip():
+            matched_user["Phone Number"] = phone
 
-    session["customer"] = {"name": name, "phone": phone}
+    _save_users(users)
+    _set_customer_session(
+        name=str(matched_user.get("Name", "")).strip() or name,
+        phone=str(matched_user.get("Phone Number", "")).strip() or phone,
+        email=str(matched_user.get("Email", "")).strip(),
+    )
     session.modified = True
     return redirect(url_for("customer"))
 

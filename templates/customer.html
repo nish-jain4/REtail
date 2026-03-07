@@ -30,7 +30,15 @@
         </div>
         <nav class="nav">
             <a href="{{ url_for('index') }}">Home</a>
+            {% if current_user %}
+            {% if is_admin_authenticated %}
+            <a href="{{ url_for('admin_dashboard') }}">Admin</a>
+            {% endif %}
+            <a href="{{ url_for('logout') }}">Logout</a>
+            {% else %}
+            <a href="{{ url_for('login') }}">Login</a>
             <a href="{{ url_for('form') }}">Sign Up</a>
+            {% endif %}
         </nav>
     </header>
 

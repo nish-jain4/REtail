@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - QuickBill</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body class="page-form">
+    <header class="header compact">
+        <a href="{{ url_for('index') }}" class="logo-wrap">
+            <img src="{{ url_for('static', filename='logo03.png') }}" alt="QuickBill" class="logo">
+        </a>
+        <nav class="nav">
+            <a href="{{ url_for('index') }}">Home</a>
+            <a href="{{ url_for('login') }}">Login</a>
+            <a href="{{ url_for('form') }}">Quick Signup</a>
+        </nav>
+    </header>
+
+    <main class="form-main">
+        <div class="form-card">
+            <h1>Create Login Account</h1>
+            <p class="form-desc">Register a reusable account with email and password while keeping the current checkout flow intact.</p>
+
+            <form action="{{ url_for('register') }}" method="POST" class="form">
+                <label for="name">Full Name</label>
+                <input type="text" id="name" name="name" required placeholder="Your full name">
+
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" required placeholder="you@example.com">
+
+                <label for="phone">Phone Number</label>
+                <input type="tel" id="phone" name="phone" placeholder="+91 98xxxxxx">
+
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required placeholder="Create a password">
+
+                <div class="form-error" role="alert" aria-live="polite">{{ error_message }}</div>
+
+                <button type="submit" class="btn btn-primary btn-full">Register</button>
+            </form>
+
+            <p class="form-footer">
+                Already have an account? <a href="{{ url_for('login') }}">Login</a>
+            </p>
+        </div>
+    </main>
+</body>
+</html>

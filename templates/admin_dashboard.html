@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - QuickBill</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .admin-shell {
+            width: min(1280px, 95vw);
+            margin: 18px auto 36px;
+            display: grid;
+            gap: 16px;
+        }
+
+        .admin-hero {
+            display: grid;
+            gap: 16px;
+        }
+
+        .admin-summary {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .admin-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 16px;
+        }
+
+        .admin-panel {
+            padding: 18px;
+            display: grid;
+            gap: 14px;
+        }
+
+        .admin-banner {
+            border-radius: 14px;
+            border: 1px solid rgba(255, 167, 127, 0.5);
+            background: rgba(255, 114, 45, 0.14);
+            color: #ffd9c8;
+            padding: 12px 14px;
+        }
+
+        .admin-form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .admin-form-grid .full {
+            grid-column: 1 / -1;
+        }
+
+        .admin-form-grid input {
+            width: 100%;
+            border-radius: 10px;
+            border: 1px solid rgba(79, 102, 136, 0.7);
+            background: rgba(11, 17, 28, 0.94);
+            color: #e5edf9;
+            padding: 10px;
+        }
+
+        .admin-form-grid input:focus {
+            outline: 2px solid rgba(255, 129, 79, 0.35);
+            border-color: rgba(255, 129, 79, 0.8);
+        }
+
+        .admin-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: grid;
+            gap: 10px;
+        }
+
+        .admin-list li {
+            border-radius: 12px;
+            border: 1px solid rgba(75, 96, 128, 0.65);
+            background: rgba(22, 33, 49, 0.74);
+            padding: 12px;
+        }
+
+        .admin-list strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .admin-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            font-size: 12px;
+            color: #a8b7ce;
+        }
+
+        .admin-table-wrap {
+            overflow: auto;
+            border-radius: 14px;
+            border: 1px solid rgba(75, 96, 128, 0.65);
+            background: rgba(16, 24, 36, 0.82);
+        }
+
+        .admin-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 760px;
+        }
+
+        .admin-table th,
+        .admin-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(75, 96, 128, 0.5);
+            text-align: left;
+            font-size: 13px;
+        }
+
+        .admin-table th {
+            color: #ffd0bb;
+            font-family: "Syne", sans-serif;
+            font-weight: 600;
+            background: rgba(26, 36, 52, 0.92);
+            position: sticky;
+            top: 0;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            border: 1px solid rgba(84, 104, 136, 0.7);
+            background: rgba(24, 33, 49, 0.9);
+        }
+
+        .pill.critical {
+            border-color: rgba(255, 107, 107, 0.8);
+            color: #ffc5c5;
+        }
+
+        .pill.low {
+            border-color: rgba(255, 174, 77, 0.8);
+            color: #ffdca6;
+        }
+
+        .section-link-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        @media (max-width: 980px) {
+            .admin-summary,
+            .admin-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body class="page-home">
+    <header class="header compact home-header">
+        <a href="{{ url_for('index') }}" class="logo-wrap">
+            <img src="{{ url_for('static', filename='logo03.png') }}" alt="QuickBill" class="logo">
+        </a>
+        <nav class="nav home-nav">
+            <a href="{{ url_for('index') }}">Home</a>
+            <a href="{{ url_for('customer') }}">Retail UI</a>
+            <a href="{{ url_for('admin_inventory_alerts') }}">Alerts JSON</a>
+            <a href="{{ url_for('admin_inventory_insights') }}">Insights JSON</a>
+        </nav>
+        <div class="home-header-cta">
+            <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
+        </div>
+    </header>
+
+    <main class="admin-shell">
+        {% if message %}
+        <div class="admin-banner">{{ message }}</div>
+        {% endif %}
+
+        <section class="admin-hero">
+            <div class="section-head">
+                <h1>Admin Dashboard</h1>
+                <p>Inventory control, product management, sales monitoring, and low-stock visibility in one panel.</p>
+            </div>
+            <div class="admin-summary">
+                <article class="metric-card">
+                    <strong>{{ dashboard.insights.summary.total_products }}</strong>
+                    <span>Total Products</span>
+                </article>
+                <article class="metric-card">
+                    <strong>{{ dashboard.registered_users }}</strong>
+                    <span>Registered Customers</span>
+                </article>
+                <article class="metric-card">
+                    <strong>{{ dashboard.insights.summary.open_alerts }}</strong>
+                    <span>Open Alerts</span>
+                </article>
+                <article class="metric-card">
+                    <strong>{{ "%.2f"|format(dashboard.total_revenue) }}</strong>
+                    <span>Total Revenue</span>
+                </article>
+            </div>
+        </section>
+
+        <section class="admin-grid">
+            <article class="panel admin-panel">
+                <div class="section-head">
+                    <h2>Add Product</h2>
+                    <p>Create new inventory items without affecting the existing checkout flow.</p>
+                </div>
+                <form action="{{ url_for('admin_add_product') }}" method="POST" class="admin-form-grid">
+                    <input type="text" name="product_id" placeholder="Product ID / Barcode" required>
+                    <input type="text" name="product_name" placeholder="Product name" required>
+                    <input type="number" name="stock_quantity" min="0" value="0" placeholder="Stock quantity" required>
+                    <input type="number" step="0.01" min="0" name="price" value="0.00" placeholder="Price" required>
+                    <input type="number" min="0" name="reorder_level" value="10" placeholder="Reorder level" required>
+                    <input type="number" min="0" name="critical_level" value="3" placeholder="Critical level" required>
+                    <div class="full">
+                        <button type="submit" class="btn btn-primary">Add Product</button>
+                    </div>
+                </form>
+            </article>
+
+            <article class="panel admin-panel">
+                <div class="section-head">
+                    <h2>Open Alerts</h2>
+                    <p>Low-stock products that still need action.</p>
+                </div>
+                <ul class="admin-list">
+                    {% for alert in dashboard.open_alerts[:5] %}
+                    <li>
+                        <strong>{{ alert.product_name }}</strong>
+                        <div class="admin-meta">
+                            <span>ID: {{ alert.product_id }}</span>
+                            <span>Stock: {{ alert.stock_quantity }}</span>
+                            <span class="pill {{ alert.severity }}">{{ alert.severity|upper }}</span>
+                        </div>
+                    </li>
+                    {% else %}
+                    <li>No open alerts right now.</li>
+                    {% endfor %}
+                </ul>
+            </article>
+        </section>
+
+        <section class="admin-grid">
+            <article class="panel admin-panel">
+                <div class="section-head">
+                    <h2>Fast Moving</h2>
+                    <p>Best sellers in the last {{ dashboard.insights.summary.window_days }} days.</p>
+                </div>
+                <ul class="admin-list">
+                    {% for item in dashboard.insights.fast_moving %}
+                    <li>
+                        <strong>{{ item.product_name }}</strong>
+                        <div class="admin-meta">
+                            <span>Sold: {{ item.sold_quantity }}</span>
+                            <span>Stock: {{ item.current_stock }}</span>
+                            <span>Cover: {{ item.stock_cover_days if item.stock_cover_days is not none else "n/a" }} days</span>
+                        </div>
+                    </li>
+                    {% else %}
+                    <li>No movement data yet.</li>
+                    {% endfor %}
+                </ul>
+            </article>
+
+            <article class="panel admin-panel">
+                <div class="section-head">
+                    <h2>Slow / Dead Stock</h2>
+                    <p>Products that may need a promotion or restocking rethink.</p>
+                </div>
+                <ul class="admin-list">
+                    {% for item in dashboard.insights.slow_moving + dashboard.insights.dead_stock %}
+                    <li>
+                        <strong>{{ item.product_name }}</strong>
+                        <div class="admin-meta">
+                            <span>Sold: {{ item.sold_quantity }}</span>
+                            <span>Stock: {{ item.current_stock }}</span>
+                            <span>Reorder: {{ item.reorder_level }}</span>
+                        </div>
+                    </li>
+                    {% else %}
+                    <li>No slow or dead stock detected yet.</li>
+                    {% endfor %}
+                </ul>
+            </article>
+        </section>
+
+        <section class="panel admin-panel">
+            <div class="section-head">
+                <h2>Inventory Snapshot</h2>
+                <p>Current product master with stock thresholds.</p>
+            </div>
+            <div class="admin-table-wrap">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th>ID</th>
+                            <th>Stock</th>
+                            <th>Price</th>
+                            <th>Reorder</th>
+                            <th>Critical</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for product in dashboard.products %}
+                        {% set severity = "critical" if product.stock_quantity <= product.critical_level else "low" if product.stock_quantity <= product.reorder_level else "" %}
+                        <tr>
+                            <td>{{ product.product_name }}</td>
+                            <td>{{ product.product_id }}</td>
+                            <td>{{ product.stock_quantity }}</td>
+                            <td>{{ "%.2f"|format(product.price) }}</td>
+                            <td>{{ product.reorder_level }}</td>
+                            <td>{{ product.critical_level }}</td>
+                            <td>
+                                {% if severity %}
+                                <span class="pill {{ severity }}">{{ severity|upper }}</span>
+                                {% else %}
+                                <span class="pill">Healthy</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7">No products available.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel admin-panel">
+            <div class="section-head">
+                <h2>Recent Sales</h2>
+                <p>Latest completed payments recorded by the current checkout flow.</p>
+            </div>
+            <div class="admin-table-wrap">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Transaction</th>
+                            <th>Customer</th>
+                            <th>Items</th>
+                            <th>Total</th>
+                            <th>Status</th>
+                            <th>When</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sale in dashboard.recent_sales %}
+                        <tr>
+                            <td>{{ sale.transaction_id }}</td>
+                            <td>{{ sale.customer_name }}</td>
+                            <td>{{ sale.items_bought }}</td>
+                            <td>{{ "%.2f"|format(sale.total_amount|float) }}</td>
+                            <td>{{ sale.status }}</td>
+                            <td>{{ sale.date }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6">No sales captured yet.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

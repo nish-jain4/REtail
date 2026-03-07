@@ -15,7 +15,13 @@
             <img src="{{ url_for('static', filename='retail-logo.svg') }}" class="brand-logo" alt="" aria-hidden="true">
             <span class="brand-name">REtail</span>
         </a>
-        <a href="{{ url_for('index') }}" class="back-link">&larr; Home</a>
+        <nav class="nav">
+            <a href="{{ url_for('index') }}">Home</a>
+            <a href="{{ url_for('login') }}">Login</a>
+            {% if is_admin_authenticated %}
+            <a href="{{ url_for('admin_dashboard') }}">Admin</a>
+            {% endif %}
+        </nav>
     </header>
 
     <main class="form-main">
@@ -36,7 +42,10 @@
             </form>
 
             <p class="form-footer">
-                Already have an account? <a href="{{ url_for('customer') }}">Start shopping</a>
+                Already have an account? <a href="{{ url_for('login') }}">Login here</a>
+            </p>
+            <p class="form-footer">
+                Want the faster guest flow? <a href="{{ url_for('customer') }}">Open retail UI directly</a>
             </p>
         </div>
     </main>
