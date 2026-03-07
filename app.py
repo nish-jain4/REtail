@@ -304,6 +304,14 @@ def _cart_total(items: list[dict[str, Any]]) -> float:
     return round(sum(_to_float(item.get("line_total"), 0.0) for item in items), 2)
 
 
+def _snapshot_cart_for_undo(items: list[dict[str, Any]]) -> None:
+    session["undo_cart_snapshot"] = {
+        "items": [dict(item) for item in items],
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    session.modified = True
+
+
 # ---------- Payment gateway helpers ----------
 def _create_razorpay_order(amount_minor: int, receipt: str, notes: dict[str, str]) -> dict[str, Any]:
     if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
@@ -412,15 +420,17 @@ def submit_form():
 @app.route("/get_items")
 def get_items():
     items = _load_cart_items()
-    payload = [
-        {
-            "Item Name": item["name"],
-            "Price": item["price"],
-            "Quantity": item["quantity"],
-            "Line Total": item["line_total"],
-        }
-        for item in items
-    ]
+    payload: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        payload.append(
+            {
+                "line_index": index,
+                "Item Name": item["name"],
+                "Price": item["price"],
+                "Quantity": item["quantity"],
+                "Line Total": item["line_total"],
+            }
+        )
     return jsonify(
         {
             "items": payload,
@@ -430,10 +440,25 @@ def get_items():
     )
 
 
+@app.route("/recommendations")
+def recommendations():
+    products = _load_products()
+    items = [
+        {
+            "product_id": product["product_id"],
+            "name": product["product_name"],
+            "price": product["price"],
+        }
+        for product in products[:8]
+    ]
+    return jsonify({"items": items})
+
+
 @app.route("/add_item", methods=["POST"])
 def add_item():
     payload = request.get_json(silent=True) or request.form.to_dict()
     product_id = str(payload.get("product_id") or payload.get("barcode") or "").strip()
+    normalized_product_id = product_id.lower()
     quantity = _to_int(payload.get("quantity", 1), 1)
     quantity = quantity if quantity > 0 else 1
 
@@ -441,7 +466,15 @@ def add_item():
         return jsonify({"error": "product_id or barcode is required."}), 400
 
     products = _load_products()
-    product_match = next((product for product in products if product["product_id"] == product_id), None)
+    product_match = next(
+        (
+            product
+            for product in products
+            if str(product["product_id"]).strip().lower() == normalized_product_id
+            or str(product["product_name"]).strip().lower() == normalized_product_id
+        ),
+        None,
+    )
     if product_match is None:
         return jsonify({"error": f"Product {product_id} not found."}), 404
 
@@ -465,6 +498,71 @@ def add_item():
             "Price": product_match["price"],
             "Quantity": quantity,
             "Line Total": line_total,
+        }
+    )
+
+
+@app.route("/remove_item", methods=["POST"])
+def remove_item():
+    payload = request.get_json(silent=True) or request.form.to_dict()
+    line_index = _to_int(payload.get("line_index", -1), -1)
+
+    cart_items = _load_cart_items()
+    if line_index < 0 or line_index >= len(cart_items):
+        return jsonify({"error": "Invalid cart item index."}), 400
+
+    _snapshot_cart_for_undo(cart_items)
+    removed_item = cart_items.pop(line_index)
+    _save_cart_items(cart_items)
+
+    return jsonify(
+        {
+            "message": "Item removed from cart.",
+            "removed_item": removed_item.get("name", "Item"),
+            "items_remaining": len(cart_items),
+            "total_amount": _cart_total(cart_items),
+        }
+    )
+
+
+@app.route("/clear_cart", methods=["POST"])
+def clear_cart():
+    cart_items = _load_cart_items()
+    if not cart_items:
+        return jsonify({"message": "Cart is already empty.", "items_remaining": 0, "total_amount": 0.0})
+
+    _snapshot_cart_for_undo(cart_items)
+    _save_cart_items([])
+
+    return jsonify(
+        {
+            "message": "All items removed from cart.",
+            "removed_count": len(cart_items),
+            "items_remaining": 0,
+            "total_amount": 0.0,
+        }
+    )
+
+
+@app.route("/undo_cart_action", methods=["POST"])
+def undo_cart_action():
+    snapshot = session.get("undo_cart_snapshot")
+    if not snapshot or not isinstance(snapshot, dict):
+        return jsonify({"error": "No cart action available to undo."}), 400
+
+    items = snapshot.get("items", [])
+    if not isinstance(items, list):
+        return jsonify({"error": "Undo snapshot is invalid."}), 400
+
+    _save_cart_items(items)
+    session.pop("undo_cart_snapshot", None)
+    session.modified = True
+
+    return jsonify(
+        {
+            "message": "Last cart action undone.",
+            "restored_count": len(items),
+            "total_amount": _cart_total(items),
         }
     )
 
@@ -564,6 +662,7 @@ def verify_payment():
 
     # Clear cart once payment is confirmed and recorded.
     _save_cart_items([])
+    session.pop("undo_cart_snapshot", None)
     session.pop("pending_payment", None)
     session.modified = True
 

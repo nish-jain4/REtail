@@ -3,61 +3,226 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Home Page</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename= ('app.css'))}}">
+    <title>QuickBill - Retail Self Checkout</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
-<body>
-    <header>
-        <div class="logo-container">
-            <img src="{{ url_for ('static', filename='logo03.png') }}" alt="Logo" class="logo">
-        </div>
-        <nav class="navbar">
+<body class="page-home">
+    <header class="header compact home-header">
+        <a href="{{ url_for('index') }}" class="logo-wrap">
+            <img src="{{ url_for('static', filename='logo03.png') }}" alt="QuickBill" class="logo">
+        </a>
+        <nav class="nav home-nav">
             <a href="#about">About</a>
-            <a href="#purpose">Purpose</a>
+            <a href="#workflow">Workflow</a>
             <a href="#team">Team</a>
             <a href="#contact">Contact</a>
-            <a href="{{url_for ('customer')}}">Customer</a>
-            <a href="{{url_for ('form')}}">Signup</a>
         </nav>
+        <div class="home-header-cta">
+            <a href="{{ url_for('form') }}" class="btn btn-secondary">Sign Up</a>
+            <a href="{{ url_for('customer') }}" class="btn btn-primary">Open Retail UI</a>
+        </div>
     </header>
-    <main>
-        <section id="about" class="section">
-            <h1>About Us</h1>
-            <p>QuickBill is revolutionizing retail payments with seamless transactions. We make shopping smooth, fast, and hassle-free.</p>
-        </section>
-        <section id="purpose" class="section">
-            <h1>Our Purpose</h1>
-            <p>Eliminating checkout queues through AI-driven transactions and smart integration, making payments effortless.</p>
-        </section>
-        <section id="team" class="section">
-            <h1>Meet the Team</h1>
-            <div class="team-container">
-                <div class="team-member">
-                    <img src="{{ url_for('static', filename='member01.jpg') }}" alt="Vanshika">
-                    <h3>Vanshika</h3>
-                    <p>Front-End Developer</p>
+
+    <main class="home-shell">
+        <section class="home-hero reveal">
+            <div class="hero-copy">
+                <p class="hero-tag">QUEUE-FREE SHOPPING EXPERIENCE</p>
+                <h1>Scan, review, and pay your retail bill in one smooth flow.</h1>
+                <p>
+                    QuickBill turns every shopper into a fast self-checkout lane. Add items instantly,
+                    view your live bill, and complete payment before reaching the exit.
+                </p>
+                <div class="hero-actions">
+                    <a href="{{ url_for('customer') }}" class="btn btn-primary">Start Scanning</a>
+                    <a href="{{ url_for('form') }}" class="btn btn-secondary">Create Account</a>
                 </div>
-                <div class="team-member">
-                    <img src="{{ url_for('static', filename='member04.jpg') }}" alt="Nishtha">
-                    <h3>Nishtha</h3>
-                    <p>Project Manager</p>
+                <div class="hero-metrics">
+                    <div class="metric-card tilt-card" data-tilt>
+                        <strong data-count="3">0</strong>
+                        <span>Checkout Steps</span>
+                    </div>
+                    <div class="metric-card tilt-card" data-tilt>
+                        <strong data-count="8">0</strong>
+                        <span>Dynamic Suggestions</span>
+                    </div>
+                    <div class="metric-card tilt-card" data-tilt>
+                        <strong data-count="100">0</strong>
+                        <span>% Digital Billing</span>
+                    </div>
                 </div>
-                <div class="team-member">
-                    <img src="{{ url_for('static', filename='member01.jpg') }}" alt="Khushboo">
-                    <h3>Khushboo</h3>
-                    <p>Backend Developer</p>
-                </div>
-                <div class="team-member">
-                    <img src="{{ url_for('static', filename='member04.jpg') }}" alt="Rudraksh Khanna">
-                    <h3>Rudraksh Khanna</h3>
-                    <p>Developer Operations</p>
+            </div>
+
+            <div class="hero-visual tilt-card" data-tilt>
+                <div class="mock-frame">
+                    <div class="mock-top">
+                        <span>Retail</span>
+                        <small>Live Session</small>
+                    </div>
+                    <div class="mock-columns">
+                        <div class="mock-card">
+                            <h4>Recommendations</h4>
+                            <ul>
+                                <li>Coca-Cola</li>
+                                <li>Lays Chips</li>
+                                <li>Nutella</li>
+                            </ul>
+                        </div>
+                        <div class="mock-card center">
+                            <h4>Camera To Scan</h4>
+                            <div class="mock-scan">
+                                <div class="mock-beam"></div>
+                            </div>
+                        </div>
+                        <div class="mock-card">
+                            <h4>Bill</h4>
+                            <ul>
+                                <li>2 x Coke</li>
+                                <li>1 x Chips</li>
+                                <li>Total: INR 220</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <button class="mock-pay">Pay Bill</button>
                 </div>
             </div>
         </section>
-        <section id="contact" class="section">
-            <h1>Contact Us</h1>
-            <p>Email: <a href="mailto:support@quickbill.com">support@quickbill.com</a></p>
+
+        <section id="about" class="home-section reveal">
+            <div class="section-head">
+                <h2>About QuickBill</h2>
+                <p>Built for retail stores that want faster checkout without adding more counters.</p>
+            </div>
+            <div class="about-grid">
+                <article class="glass-card tilt-card" data-tilt>
+                    <h3>Real-Time Billing</h3>
+                    <p>Every add-to-cart action updates the bill instantly so customers always see accurate totals.</p>
+                </article>
+                <article class="glass-card tilt-card" data-tilt>
+                    <h3>Gateway Payments</h3>
+                    <p>Razorpay order creation and signature verification ensure payment flow stays secure.</p>
+                </article>
+                <article class="glass-card tilt-card" data-tilt>
+                    <h3>Store-Ready Logs</h3>
+                    <p>Successful transactions are stored for reporting and audit in your sales table.</p>
+                </article>
+            </div>
+        </section>
+
+        <section id="workflow" class="home-section reveal">
+            <div class="section-head">
+                <h2>How It Works</h2>
+                <p>Simple customer journey from entry to payment.</p>
+            </div>
+            <div class="workflow-row">
+                <div class="flow-card tilt-card" data-tilt>
+                    <span>01</span>
+                    <h3>Sign Up</h3>
+                    <p>Customer enters basic details and starts a shopping session.</p>
+                </div>
+                <div class="flow-card tilt-card" data-tilt>
+                    <span>02</span>
+                    <h3>Scan / Add Items</h3>
+                    <p>Items are added by barcode or product ID and reflected in live bill.</p>
+                </div>
+                <div class="flow-card tilt-card" data-tilt>
+                    <span>03</span>
+                    <h3>Pay Bill</h3>
+                    <p>Checkout opens Razorpay, verifies payment, then confirms bill completion.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="team" class="home-section reveal">
+            <div class="section-head">
+                <h2>Meet The Team</h2>
+            </div>
+            <div class="team-grid">
+                <article class="team-card tilt-card" data-tilt>
+                    <img src="{{ url_for('static', filename='member01.jpg') }}" alt="Vanshika">
+                    <h3>Vanshika</h3>
+                    <p>Front-End Developer</p>
+                </article>
+                <article class="team-card tilt-card" data-tilt>
+                    <img src="{{ url_for('static', filename='member04.jpg') }}" alt="Nishtha">
+                    <h3>Nishtha</h3>
+                    <p>Project Manager</p>
+                </article>
+                <article class="team-card tilt-card" data-tilt>
+                    <img src="{{ url_for('static', filename='member01.jpg') }}" alt="Khushboo">
+                    <h3>Khushboo</h3>
+                    <p>Backend Developer</p>
+                </article>
+                <article class="team-card tilt-card" data-tilt>
+                    <img src="{{ url_for('static', filename='member04.jpg') }}" alt="Rudraksh Khanna">
+                    <h3>Rudraksh Khanna</h3>
+                    <p>Developer Operations</p>
+                </article>
+            </div>
+        </section>
+
+        <section id="contact" class="home-contact reveal">
+            <div>
+                <h2>Need Store Integration Support?</h2>
+                <p>Contact us for setup, deployment, and scanner integration.</p>
+            </div>
+            <a href="mailto:support@quickbill.com" class="btn btn-primary">support@quickbill.com</a>
         </section>
     </main>
+
+    <script>
+        function enableTilt() {
+            if (window.matchMedia("(pointer: coarse)").matches) {
+                return;
+            }
+            document.querySelectorAll("[data-tilt]").forEach((card) => {
+                card.addEventListener("mousemove", (event) => {
+                    const rect = card.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const y = event.clientY - rect.top;
+                    const rotateX = ((y / rect.height) - 0.5) * -9;
+                    const rotateY = ((x / rect.width) - 0.5) * 9;
+                    card.style.transform = `perspective(1100px) rotateX(${rotateX.toFixed(2)}deg) rotateY(${rotateY.toFixed(2)}deg)`;
+                });
+                card.addEventListener("mouseleave", () => {
+                    card.style.transform = "perspective(1100px) rotateX(0deg) rotateY(0deg)";
+                });
+            });
+        }
+
+        function startCounters() {
+            document.querySelectorAll("[data-count]").forEach((element) => {
+                const target = Number(element.getAttribute("data-count") || 0);
+                let current = 0;
+                const step = Math.max(1, Math.ceil(target / 30));
+                const timer = setInterval(() => {
+                    current += step;
+                    if (current >= target) {
+                        current = target;
+                        clearInterval(timer);
+                    }
+                    element.textContent = current;
+                }, 30);
+            });
+        }
+
+        function revealSections() {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add("in-view");
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.2 });
+            document.querySelectorAll(".reveal").forEach((section) => observer.observe(section));
+        }
+
+        enableTilt();
+        startCounters();
+        revealSections();
+    </script>
 </body>
 </html>

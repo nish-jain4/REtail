@@ -3,75 +3,209 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shopping - QuickBill</title>
+    <title>REtail Checkout</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </head>
 <body class="page-customer">
-    <header class="header compact">
-        <a href="{{ url_for('index') }}" class="logo-wrap">
-            <img src="{{ url_for('static', filename='logo03.png') }}" alt="QuickBill" class="logo">
+    <div class="bg-3d" aria-hidden="true">
+        <span class="bg-orb orb-one"></span>
+        <span class="bg-orb orb-two"></span>
+        <span class="bg-orb orb-three"></span>
+        <span class="bg-grid"></span>
+    </div>
+    <header class="header compact retail-header">
+        <a href="{{ url_for('index') }}" class="brand-retail" aria-label="REtail Home">
+            <span class="brand-cube" aria-hidden="true"></span>
+            <span class="brand-name">REtail</span>
         </a>
+        <div class="retail-title">
+            <h1>REtail</h1>
+            <p>Scan fast. Skip queues. Pay in-app.</p>
+        </div>
         <nav class="nav">
             <a href="{{ url_for('index') }}">Home</a>
             <a href="{{ url_for('form') }}">Sign Up</a>
         </nav>
     </header>
 
-    <main class="customer-main">
-        <aside class="cart-panel">
-            <h2>Your Cart</h2>
-            <ul class="cart-list" id="itemList" aria-live="polite">
-                <li class="cart-empty" id="cartEmpty">No items yet. Scan or add products.</li>
-            </ul>
-            <div class="cart-total" id="cartTotal"></div>
-        </aside>
-
-        <section class="scan-section">
-            <h2>Scan Your Items</h2>
-            <p class="scan-desc">Use barcode/product id for now. Camera scanner can be connected here.</p>
-
-            <div class="manual-add">
-                <label for="barcodeInput">Add by Barcode / Product ID</label>
-                <div class="add-row">
-                    <input type="text" id="barcodeInput" placeholder="Enter barcode or product ID" autocomplete="off">
-                    <input type="number" id="qtyInput" min="1" value="1" aria-label="Quantity">
-                    <button type="button" class="btn btn-secondary" id="addItemBtn">Add</button>
+    <main class="retail-shell">
+        <div class="retail-grid">
+            <aside class="panel reco-panel tilt-card" data-tilt>
+                <div class="panel-head">
+                    <h2>Recommended</h2>
+                    <button type="button" class="ghost-btn" id="recoRefreshBtn">Refresh</button>
                 </div>
-                <p class="hint" id="addHint"></p>
-            </div>
+                <ul class="reco-list" id="recoList">
+                    <li class="empty-line">Loading suggestions...</li>
+                </ul>
+            </aside>
 
-            <div class="scanner-placeholder" id="scanner">
-                <span>Scanner Placeholder</span>
-                <small>Backend API is ready for barcode feed integration.</small>
-            </div>
+            <section class="panel scan-panel tilt-card" data-tilt>
+                <h2>Camera To Scan Items</h2>
+                <p class="scan-note">Use your laptop camera to scan QR/barcodes and auto-add items to bill.</p>
 
-            <div class="customer-actions">
-                <button type="button" class="btn btn-secondary" id="refreshBtn">Refresh Cart</button>
-                <button type="button" class="btn btn-primary" id="checkoutBtn">Pay Now</button>
-            </div>
-        </section>
+                <div class="scanner-stage" id="scanner">
+                    <video id="scannerVideo" class="scanner-video" playsinline muted></video>
+                    <div class="scanner-beam"></div>
+                    <div class="scan-copy">
+                        <strong>Scan zone ready</strong>
+                        <span>Place barcode in frame or type product id below.</span>
+                    </div>
+                </div>
+                <div class="scanner-toolbar">
+                    <button type="button" class="btn btn-secondary" id="toggleScannerBtn">Start Laptop Scanner</button>
+                    <span class="scanner-status" id="scannerStatus" data-state="idle">Scanner idle.</span>
+                </div>
+
+                <div class="manual-add">
+                    <label for="barcodeInput">Product ID / Barcode</label>
+                    <div class="add-row">
+                        <input type="text" id="barcodeInput" placeholder="Enter barcode" autocomplete="off">
+                        <input type="number" id="qtyInput" min="1" value="1" aria-label="Quantity">
+                        <button type="button" class="btn btn-secondary" id="addItemBtn">Add Item</button>
+                    </div>
+                    <p class="hint" id="addHint"></p>
+                </div>
+            </section>
+
+            <aside class="panel bill-panel tilt-card" data-tilt>
+                <div class="panel-head">
+                    <h2>Bill</h2>
+                    <span class="bill-count" id="billCount">0 items</span>
+                </div>
+                <ul class="bill-list" id="itemList" aria-live="polite">
+                    <li class="empty-line" id="cartEmpty">No items added yet.</li>
+                </ul>
+                <div class="bill-total" id="cartTotal">Total: INR 0.00</div>
+            </aside>
+        </div>
+
+        <div class="pay-strip">
+            <button type="button" class="btn btn-secondary clear-cart-btn" id="clearCartBtn">Delete All</button>
+            <button type="button" class="btn btn-secondary" id="refreshBtn">Refresh Bill</button>
+            <button type="button" class="btn pay-btn" id="checkoutBtn">Pay Bill</button>
+        </div>
     </main>
+    <div class="undo-snackbar" id="undoSnackbar" role="status" aria-live="polite">
+        <span id="undoText">Item removed.</span>
+        <button type="button" class="undo-action" id="undoBtn">Undo</button>
+        <button type="button" class="undo-close" id="undoCloseBtn" aria-label="Close undo message">x</button>
+    </div>
 
     <script>
-        // UI state references.
         const itemList = document.getElementById("itemList");
         const cartEmpty = document.getElementById("cartEmpty");
         const cartTotal = document.getElementById("cartTotal");
+        const billCount = document.getElementById("billCount");
         const addHint = document.getElementById("addHint");
         const barcodeInput = document.getElementById("barcodeInput");
         const qtyInput = document.getElementById("qtyInput");
         const addItemBtn = document.getElementById("addItemBtn");
+        const clearCartBtn = document.getElementById("clearCartBtn");
         const refreshBtn = document.getElementById("refreshBtn");
         const checkoutBtn = document.getElementById("checkoutBtn");
+        const recoList = document.getElementById("recoList");
+        const recoRefreshBtn = document.getElementById("recoRefreshBtn");
+        const scannerStage = document.getElementById("scanner");
+        const scannerVideo = document.getElementById("scannerVideo");
+        const toggleScannerBtn = document.getElementById("toggleScannerBtn");
+        const scannerStatus = document.getElementById("scannerStatus");
+        const undoSnackbar = document.getElementById("undoSnackbar");
+        const undoText = document.getElementById("undoText");
+        const undoBtn = document.getElementById("undoBtn");
+        const undoCloseBtn = document.getElementById("undoCloseBtn");
+
+        let scannerActive = false;
+        let scannerStream = null;
+        let barcodeDetector = null;
+        let detectorMode = "none";
+        let scannerRafId = null;
+        let scanFrameBusy = false;
+        let autoAddLock = false;
+        let lastDetectedCode = "";
+        let lastDetectedAt = 0;
+        const DETECT_COOLDOWN_MS = 1600;
+        const fallbackCanvas = document.createElement("canvas");
+        const fallbackContext = fallbackCanvas.getContext("2d", { willReadFrequently: true });
+        let undoTimerId = null;
 
         function escapeHtml(value) {
             const div = document.createElement("div");
             div.textContent = value || "";
             return div.innerHTML;
+        }
+
+        function setScannerStatus(message, state) {
+            scannerStatus.textContent = message;
+            scannerStatus.setAttribute("data-state", state || "idle");
+        }
+
+        function normalizeScannedCode(rawValue) {
+            const raw = String(rawValue || "").trim();
+            if (!raw) {
+                return "";
+            }
+
+            try {
+                const parsed = JSON.parse(raw);
+                const fromJson = parsed.product_id || parsed.productId || parsed.id || parsed.code;
+                if (fromJson) {
+                    return String(fromJson).trim();
+                }
+            } catch (error) {
+                // Not JSON; continue with URL/plain parsing.
+            }
+
+            if (raw.includes("://")) {
+                try {
+                    const url = new URL(raw);
+                    const fromQuery = url.searchParams.get("product_id")
+                        || url.searchParams.get("id")
+                        || url.searchParams.get("code");
+                    if (fromQuery) {
+                        return fromQuery.trim();
+                    }
+                    const lastPathToken = url.pathname.split("/").filter(Boolean).pop();
+                    if (lastPathToken) {
+                        return decodeURIComponent(lastPathToken).trim();
+                    }
+                } catch (error) {
+                    // Not a valid URL; use raw value.
+                }
+            }
+
+            return raw;
+        }
+
+        function scannerFlash() {
+            scannerStage.classList.remove("scan-hit");
+            window.requestAnimationFrame(() => {
+                scannerStage.classList.add("scan-hit");
+            });
+        }
+
+        function hideUndoSnackbar() {
+            undoSnackbar.classList.remove("show");
+            if (undoTimerId) {
+                window.clearTimeout(undoTimerId);
+                undoTimerId = null;
+            }
+        }
+
+        function showUndoSnackbar(message) {
+            undoText.textContent = message;
+            undoSnackbar.classList.add("show");
+            if (undoTimerId) {
+                window.clearTimeout(undoTimerId);
+            }
+            undoTimerId = window.setTimeout(() => {
+                hideUndoSnackbar();
+            }, 7000);
         }
 
         function formatCurrency(amount, currency) {
@@ -86,24 +220,59 @@
             if (!items || items.length === 0) {
                 cartEmpty.style.display = "block";
                 itemList.appendChild(cartEmpty);
+                billCount.textContent = "0 items";
                 cartTotal.textContent = "Total: " + formatCurrency(0, currency);
+                clearCartBtn.disabled = true;
                 return;
             }
 
             cartEmpty.style.display = "none";
-            items.forEach((item) => {
+            billCount.textContent = items.length + " items";
+            clearCartBtn.disabled = false;
+            items.forEach((item, index) => {
                 const line = Number(item["Line Total"] || 0);
                 const quantity = Number(item["Quantity"] || 1);
+                const lineIndex = Number(item.line_index ?? index);
                 const li = document.createElement("li");
-                li.className = "cart-item";
-                li.innerHTML = `<span class="cart-item-name">${escapeHtml(item["Item Name"])}</span><span class="cart-item-price">${formatCurrency(line, currency)} x ${quantity}</span>`;
+                li.className = "bill-item";
+                li.innerHTML = `
+                    <div class="bill-item-main">
+                        <div class="bill-item-name">${escapeHtml(item["Item Name"])}</div>
+                        <div class="bill-item-meta">${quantity} x ${formatCurrency(Number(item["Price"] || 0), currency)}</div>
+                        <div class="bill-item-line">${formatCurrency(line, currency)}</div>
+                    </div>
+                    <button type="button" class="bill-delete" data-index="${lineIndex}">Delete</button>
+                `;
                 itemList.appendChild(li);
             });
             cartTotal.textContent = "Total: " + formatCurrency(totalAmount, currency);
         }
 
+        function renderRecommendations(items, currency) {
+            recoList.innerHTML = "";
+            if (!items || items.length === 0) {
+                recoList.innerHTML = '<li class="empty-line">No recommendations available.</li>';
+                return;
+            }
+
+            items.forEach((item) => {
+                const li = document.createElement("li");
+                li.className = "reco-item";
+                li.innerHTML = `
+                    <div class="reco-copy">
+                        <strong>${escapeHtml(item.name)}</strong>
+                        <small>ID: ${escapeHtml(item.product_id)}</small>
+                    </div>
+                    <div class="reco-controls">
+                        <span>${formatCurrency(item.price, currency)}</span>
+                        <button type="button" class="mini-add" data-product="${escapeHtml(item.product_id)}">Add</button>
+                    </div>
+                `;
+                recoList.appendChild(li);
+            });
+        }
+
         async function loadItems() {
-            // Pull latest cart snapshot from backend and render totals.
             try {
                 const response = await fetch("{{ url_for('get_items') }}");
                 const data = await response.json();
@@ -113,8 +282,228 @@
             }
         }
 
+        async function loadRecommendations() {
+            try {
+                const response = await fetch("{{ url_for('recommendations') }}");
+                const data = await response.json();
+                renderRecommendations(data.items || [], "INR");
+            } catch (error) {
+                recoList.innerHTML = '<li class="empty-line">Unable to load recommendations.</li>';
+            }
+        }
+
+        async function buildBarcodeDetector() {
+            if (!("BarcodeDetector" in window)) {
+                return null;
+            }
+
+            let formats = ["qr_code", "ean_13", "ean_8", "upc_a", "upc_e", "code_128"];
+            if (typeof BarcodeDetector.getSupportedFormats === "function") {
+                const supported = await BarcodeDetector.getSupportedFormats();
+                const preferred = formats.filter((format) => supported.includes(format));
+                if (preferred.length) {
+                    formats = preferred;
+                }
+            }
+
+            try {
+                return new BarcodeDetector({ formats: formats });
+            } catch (error) {
+                return new BarcodeDetector();
+            }
+        }
+
+        async function handleDetectedCode(rawValue) {
+            const normalizedCode = normalizeScannedCode(rawValue);
+            if (!normalizedCode) {
+                return;
+            }
+
+            const now = Date.now();
+            if (normalizedCode === lastDetectedCode && (now - lastDetectedAt) < DETECT_COOLDOWN_MS) {
+                return;
+            }
+            if (autoAddLock) {
+                return;
+            }
+
+            autoAddLock = true;
+            lastDetectedCode = normalizedCode;
+            lastDetectedAt = now;
+
+            try {
+                await addItemById(normalizedCode, 1);
+                setScannerStatus("Scanned: " + normalizedCode + " and added to bill.", "ok");
+                addHint.textContent = "Scanned and added: " + normalizedCode;
+                scannerFlash();
+                await loadItems();
+            } catch (error) {
+                setScannerStatus("Scanned " + normalizedCode + " but item was not found.", "warn");
+                addHint.textContent = error.message;
+            } finally {
+                autoAddLock = false;
+            }
+        }
+
+        async function detectCodesFromFrame() {
+            if (detectorMode === "barcode_detector" && barcodeDetector) {
+                return barcodeDetector.detect(scannerVideo);
+            }
+
+            if (detectorMode === "jsqr_fallback" && window.jsQR && fallbackContext) {
+                const width = scannerVideo.videoWidth || 0;
+                const height = scannerVideo.videoHeight || 0;
+                if (width < 2 || height < 2) {
+                    return [];
+                }
+
+                fallbackCanvas.width = width;
+                fallbackCanvas.height = height;
+                fallbackContext.drawImage(scannerVideo, 0, 0, width, height);
+                const frame = fallbackContext.getImageData(0, 0, width, height);
+                const code = window.jsQR(frame.data, frame.width, frame.height, {
+                    inversionAttempts: "attemptBoth"
+                });
+                if (code && code.data) {
+                    return [{ rawValue: code.data }];
+                }
+            }
+
+            return [];
+        }
+
+        async function scanFrameLoop() {
+            if (!scannerActive) {
+                return;
+            }
+
+            if (!scanFrameBusy && scannerVideo.readyState >= 2) {
+                scanFrameBusy = true;
+                try {
+                    const detections = await detectCodesFromFrame();
+                    if (detections && detections.length) {
+                        const value = detections[0].rawValue || "";
+                        await handleDetectedCode(value);
+                    }
+                } catch (error) {
+                    // Ignore transient detection frame errors.
+                } finally {
+                    scanFrameBusy = false;
+                }
+            }
+
+            scannerRafId = window.requestAnimationFrame(scanFrameLoop);
+        }
+
+        async function startScanner() {
+            if (scannerActive) {
+                return;
+            }
+
+            if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+                setScannerStatus("Camera requires HTTPS or localhost.", "error");
+                return;
+            }
+
+            barcodeDetector = await buildBarcodeDetector();
+            detectorMode = barcodeDetector ? "barcode_detector" : "none";
+            if (!barcodeDetector && window.jsQR && fallbackContext) {
+                detectorMode = "jsqr_fallback";
+                setScannerStatus("Using QR fallback scanner mode for this browser.", "warn");
+            }
+            if (detectorMode === "none") {
+                setScannerStatus("Scanner not supported. Use Chrome/Edge or keep manual product ID add.", "error");
+                return;
+            }
+
+            try {
+                scannerStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: "environment" },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: false
+                });
+                scannerVideo.srcObject = scannerStream;
+                await scannerVideo.play();
+                scannerActive = true;
+                scannerStage.classList.add("scanner-live");
+                toggleScannerBtn.textContent = "Stop Scanner";
+                if (detectorMode === "barcode_detector") {
+                    setScannerStatus("Scanner active. Point barcode/QR to camera.", "ok");
+                } else {
+                    setScannerStatus("Scanner active in QR fallback mode.", "ok");
+                }
+                scanFrameLoop();
+            } catch (error) {
+                setScannerStatus("Unable to access camera. Check browser permission.", "error");
+            }
+        }
+
+        function stopScanner() {
+            scannerActive = false;
+            if (scannerRafId) {
+                window.cancelAnimationFrame(scannerRafId);
+                scannerRafId = null;
+            }
+            if (scannerStream) {
+                scannerStream.getTracks().forEach((track) => track.stop());
+                scannerStream = null;
+            }
+            scannerVideo.srcObject = null;
+            scannerStage.classList.remove("scanner-live");
+            toggleScannerBtn.textContent = "Start Laptop Scanner";
+            setScannerStatus("Scanner paused.", "idle");
+            detectorMode = "none";
+            barcodeDetector = null;
+        }
+
+        async function addItemById(productId, quantity) {
+            const response = await fetch("{{ url_for('add_item') }}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ product_id: productId, quantity: quantity })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Unable to add product.");
+            }
+            return data;
+        }
+
+        async function removeItemByIndex(lineIndex) {
+            const response = await fetch("{{ url_for('remove_item') }}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ line_index: lineIndex })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Unable to remove item.");
+            }
+            return data;
+        }
+
+        async function clearCart() {
+            const response = await fetch("{{ url_for('clear_cart') }}", { method: "POST" });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Unable to clear cart.");
+            }
+            return data;
+        }
+
+        async function undoLastCartAction() {
+            const response = await fetch("{{ url_for('undo_cart_action') }}", { method: "POST" });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Undo not available.");
+            }
+            return data;
+        }
+
         async function addItem() {
-            // Adds one product line into backend cart storage.
             const productId = (barcodeInput.value || "").trim();
             const quantity = Math.max(1, parseInt(qtyInput.value, 10) || 1);
 
@@ -125,28 +514,17 @@
 
             addHint.textContent = "";
             try {
-                const response = await fetch("{{ url_for('add_item') }}", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ product_id: productId, quantity: quantity })
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    addHint.textContent = data.error || "Unable to add product.";
-                    return;
-                }
-
+                const data = await addItemById(productId, quantity);
                 addHint.textContent = "Added: " + (data["Item Name"] || productId);
                 barcodeInput.value = "";
                 qtyInput.value = "1";
                 await loadItems();
             } catch (error) {
-                addHint.textContent = "Unable to add product right now.";
+                addHint.textContent = error.message;
             }
         }
 
         async function verifyPayment(payload) {
-            // Server verifies Razorpay signature before final success redirect.
             const response = await fetch("{{ url_for('verify_payment') }}", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -160,7 +538,6 @@
         }
 
         async function startCheckout() {
-            // Create order on server, then open Razorpay checkout widget.
             try {
                 const response = await fetch("{{ url_for('checkout') }}", { method: "POST" });
                 const data = await response.json();
@@ -184,7 +561,7 @@
                             alert(error.message);
                         }
                     },
-                    theme: { color: "#e94f37" }
+                    theme: { color: "#ff6b2c" }
                 };
 
                 const razorpay = new Razorpay(options);
@@ -200,10 +577,122 @@
             }
         }
 
+        function initBackgroundParallax() {
+            if (window.matchMedia("(pointer: coarse)").matches) {
+                return;
+            }
+            window.addEventListener("mousemove", (event) => {
+                const ratioX = (event.clientX / window.innerWidth) - 0.5;
+                const ratioY = (event.clientY / window.innerHeight) - 0.5;
+                document.documentElement.style.setProperty("--bg-tilt-x", `${(ratioY * -5).toFixed(2)}deg`);
+                document.documentElement.style.setProperty("--bg-tilt-y", `${(ratioX * 7).toFixed(2)}deg`);
+            });
+        }
+
+        function enableTilt() {
+            if (window.matchMedia("(pointer: coarse)").matches) {
+                return;
+            }
+
+            document.querySelectorAll("[data-tilt]").forEach((card) => {
+                card.addEventListener("mousemove", (event) => {
+                    const rect = card.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const y = event.clientY - rect.top;
+                    const rotateX = ((y / rect.height) - 0.5) * -8;
+                    const rotateY = ((x / rect.width) - 0.5) * 8;
+                    card.style.transform = `perspective(1100px) rotateX(${rotateX.toFixed(2)}deg) rotateY(${rotateY.toFixed(2)}deg) translateY(-2px)`;
+                });
+                card.addEventListener("mouseleave", () => {
+                    card.style.transform = "perspective(1100px) rotateX(0deg) rotateY(0deg)";
+                });
+            });
+        }
+
         addItemBtn.addEventListener("click", addItem);
+        clearCartBtn.addEventListener("click", async () => {
+            try {
+                const result = await clearCart();
+                addHint.textContent = result.message || "Cart cleared.";
+                await loadItems();
+                if ((result.removed_count || 0) > 0) {
+                    showUndoSnackbar("Cart cleared.");
+                }
+            } catch (error) {
+                addHint.textContent = error.message;
+            }
+        });
         refreshBtn.addEventListener("click", loadItems);
         checkoutBtn.addEventListener("click", startCheckout);
+        recoRefreshBtn.addEventListener("click", loadRecommendations);
+        toggleScannerBtn.addEventListener("click", () => {
+            if (scannerActive) {
+                stopScanner();
+            } else {
+                startScanner();
+            }
+        });
 
+        recoList.addEventListener("click", async (event) => {
+            const button = event.target.closest(".mini-add");
+            if (!button) {
+                return;
+            }
+            const productId = button.getAttribute("data-product");
+            if (!productId) {
+                return;
+            }
+
+            try {
+                await addItemById(productId, 1);
+                addHint.textContent = "Added from recommendations: " + productId;
+                await loadItems();
+            } catch (error) {
+                addHint.textContent = error.message;
+            }
+        });
+
+        itemList.addEventListener("click", async (event) => {
+            const button = event.target.closest(".bill-delete");
+            if (!button) {
+                return;
+            }
+            const lineIndex = Number(button.getAttribute("data-index"));
+            if (Number.isNaN(lineIndex)) {
+                return;
+            }
+
+            try {
+                const result = await removeItemByIndex(lineIndex);
+                addHint.textContent = "Removed: " + (result.removed_item || "item");
+                await loadItems();
+                showUndoSnackbar("Removed " + (result.removed_item || "item") + ".");
+            } catch (error) {
+                addHint.textContent = error.message;
+            }
+        });
+        undoBtn.addEventListener("click", async () => {
+            try {
+                const result = await undoLastCartAction();
+                addHint.textContent = result.message || "Undo successful.";
+                await loadItems();
+                hideUndoSnackbar();
+            } catch (error) {
+                addHint.textContent = error.message;
+            }
+        });
+        undoCloseBtn.addEventListener("click", hideUndoSnackbar);
+
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden && scannerActive) {
+                stopScanner();
+            }
+        });
+        window.addEventListener("beforeunload", stopScanner);
+
+        initBackgroundParallax();
+        enableTilt();
+        loadRecommendations();
         loadItems();
     </script>
 </body>
