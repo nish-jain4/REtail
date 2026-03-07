@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import base64
 import csv
-import hashlib
-import hmac
 import json
 import os
 import uuid
@@ -14,6 +12,16 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+
+try:
+    from pymongo import MongoClient
+    from pymongo.errors import PyMongoError
+
+    PYMONGO_AVAILABLE = True
+except ImportError:
+    MongoClient = None
+    PyMongoError = Exception
+    PYMONGO_AVAILABLE = False
 
 try:
     from openpyxl import Workbook, load_workbook
@@ -52,12 +60,40 @@ PRODUCT_IMPORT_COLUMNS = {
     "price": ("price", "Price", "amount", "mrp"),
 }
 
-RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "").strip()
-RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "").strip()
-PAYMENT_CURRENCY = os.getenv("PAYMENT_CURRENCY", "INR").strip().upper() or "INR"
+PAYPAL_CLIENT_ID = "AT4YjVQk1fNnJTW1sdd7KRMlB5OVYTBAuKh4dFp76BUiAmLiqbPP8VlJmrZhhZb5-w_0fRzNQG3BLTrw"
+PAYPAL_CLIENT_SECRET = "EDumKbVywv9AnZGKWHwCtl9o9UkEpMO_6hVbvuxk64_bbxEu303Se5pTEJAiy0KpOy4dX2G6R7rldyPa"
+PAYPAL_BASE_URL = os.getenv("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com").strip()
+PAYMENT_CURRENCY = os.getenv("PAYMENT_CURRENCY", "USD").strip().upper() or "USD"
+MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "quickbill").strip() or "quickbill"
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "quickbill-dev-secret")
+
+mongo_client: MongoClient | None = None
+mongo_db = None
+
+
+def _init_mongodb() -> None:
+    global mongo_client, mongo_db
+    if not PYMONGO_AVAILABLE:
+        print("[db] pymongo is not installed, using file storage fallback.")
+        return
+    if not MONGODB_URI:
+        return
+    try:
+        mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=2500)
+        mongo_client.admin.command("ping")
+        mongo_db = mongo_client[MONGODB_DB_NAME]
+        print(f"[db] MongoDB connected: {MONGODB_DB_NAME}")
+    except PyMongoError as exc:
+        mongo_client = None
+        mongo_db = None
+        print(f"[db] MongoDB unavailable, using file storage fallback. Reason: {exc}")
+
+
+def _using_mongodb() -> bool:
+    return mongo_db is not None
 
 
 # ---------- Generic parsing + table I/O helpers ----------
@@ -147,6 +183,13 @@ def _write_rows_xlsx(path: Path, rows: list[dict[str, Any]], columns: list[str])
 
 
 def _read_table(table_name: str) -> list[dict[str, Any]]:
+    if _using_mongodb():
+        try:
+            rows = list(mongo_db[table_name].find({}, {"_id": 0}))
+            return [dict(row) for row in rows]
+        except PyMongoError as exc:
+            print(f"[db] read failed for {table_name}, falling back to files. Reason: {exc}")
+
     xlsx_path, csv_path = _table_paths(table_name)
 
     if xlsx_path.exists() and OPENPYXL_AVAILABLE:
@@ -164,6 +207,18 @@ def _read_table(table_name: str) -> list[dict[str, Any]]:
 
 def _write_table(table_name: str, rows: list[dict[str, Any]]) -> None:
     columns = TABLE_COLUMNS[table_name]
+
+    if _using_mongodb():
+        try:
+            collection = mongo_db[table_name]
+            collection.delete_many({})
+            if rows:
+                sanitized_rows = [{column: row.get(column, "") for column in columns} for row in rows]
+                collection.insert_many(sanitized_rows)
+            return
+        except PyMongoError as exc:
+            print(f"[db] write failed for {table_name}, falling back to files. Reason: {exc}")
+
     xlsx_path, csv_path = _table_paths(table_name)
 
     if OPENPYXL_AVAILABLE:
@@ -313,29 +368,80 @@ def _snapshot_cart_for_undo(items: list[dict[str, Any]]) -> None:
 
 
 # ---------- Payment gateway helpers ----------
-def _create_razorpay_order(amount_minor: int, receipt: str, notes: dict[str, str]) -> dict[str, Any]:
-    if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
-        raise ValueError("Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET before checkout.")
+def _paypal_access_token() -> str:
+    if not PAYPAL_CLIENT_ID or not PAYPAL_CLIENT_SECRET:
+        raise ValueError("Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET before checkout.")
 
+    credentials = f"{PAYPAL_CLIENT_ID}:{PAYPAL_CLIENT_SECRET}".encode("utf-8")
+    basic_auth = base64.b64encode(credentials).decode("utf-8")
+    token_request = urllib_request.Request(
+        f"{PAYPAL_BASE_URL}/v1/oauth2/token",
+        data=b"grant_type=client_credentials",
+        headers={
+            "Authorization": f"Basic {basic_auth}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib_request.urlopen(token_request, timeout=20) as response:
+            token_body = response.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        error_text = exc.read().decode("utf-8", errors="ignore")
+        raise ValueError(f"PayPal auth failed: {error_text or exc.reason}") from exc
+    except urllib_error.URLError as exc:
+        raise ValueError(f"PayPal is unreachable: {exc.reason}") from exc
+
+    token_payload = json.loads(token_body)
+    access_token = str(token_payload.get("access_token", "")).strip()
+    if not access_token:
+        raise ValueError("PayPal auth response missing access token.")
+    return access_token
+
+
+def _create_paypal_order(
+    total_amount: float,
+    customer_name: str,
+    return_url: str,
+    cancel_url: str,
+) -> dict[str, Any]:
+    access_token = _paypal_access_token()
     payload = json.dumps(
         {
-            "amount": amount_minor,
-            "currency": PAYMENT_CURRENCY,
-            "receipt": receipt,
-            "notes": notes,
+            "intent": "CAPTURE",
+            "purchase_units": [
+                {
+                    "reference_id": f"quickbill-{uuid.uuid4().hex[:10]}",
+                    "description": f"QuickBill checkout for {customer_name}",
+                    "amount": {
+                        "currency_code": PAYMENT_CURRENCY,
+                        "value": f"{total_amount:.2f}",
+                    },
+                }
+            ],
+            "payment_source": {
+                "paypal": {
+                    "experience_context": {
+                        "brand_name": "QuickBill",
+                        "user_action": "PAY_NOW",
+                        "return_url": return_url,
+                        "cancel_url": cancel_url,
+                    }
+                }
+            },
         }
     ).encode("utf-8")
-    credentials = f"{RAZORPAY_KEY_ID}:{RAZORPAY_KEY_SECRET}".encode("utf-8")
-    basic_auth = base64.b64encode(credentials).decode("utf-8")
 
-    request_headers = {
-        "Authorization": f"Basic {basic_auth}",
-        "Content-Type": "application/json",
-    }
     api_request = urllib_request.Request(
-        "https://api.razorpay.com/v1/orders",
+        f"{PAYPAL_BASE_URL}/v2/checkout/orders",
         data=payload,
-        headers=request_headers,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "PayPal-Request-Id": f"qb-{uuid.uuid4().hex}",
+            "Prefer": "return=representation",
+        },
         method="POST",
     )
 
@@ -344,27 +450,115 @@ def _create_razorpay_order(amount_minor: int, receipt: str, notes: dict[str, str
             response_body = response.read().decode("utf-8")
     except urllib_error.HTTPError as exc:
         error_text = exc.read().decode("utf-8", errors="ignore")
-        raise ValueError(f"Razorpay order creation failed: {error_text or exc.reason}") from exc
+        raise ValueError(f"PayPal order creation failed: {error_text or exc.reason}") from exc
     except urllib_error.URLError as exc:
-        raise ValueError(f"Razorpay is unreachable: {exc.reason}") from exc
+        raise ValueError(f"PayPal is unreachable: {exc.reason}") from exc
 
     order = json.loads(response_body)
     if not order.get("id"):
-        raise ValueError("Razorpay response missing order id.")
+        raise ValueError("PayPal response missing order id.")
     return order
 
 
-def _verify_razorpay_signature(order_id: str, payment_id: str, signature: str) -> bool:
-    if not RAZORPAY_KEY_SECRET:
-        return False
+def _capture_paypal_order(order_id: str) -> dict[str, Any]:
+    access_token = _paypal_access_token()
+    api_request = urllib_request.Request(
+        f"{PAYPAL_BASE_URL}/v2/checkout/orders/{order_id}/capture",
+        data=b"{}",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
 
-    payload = f"{order_id}|{payment_id}".encode("utf-8")
-    expected_signature = hmac.new(
-        RAZORPAY_KEY_SECRET.encode("utf-8"),
-        payload,
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(expected_signature, signature)
+    try:
+        with urllib_request.urlopen(api_request, timeout=20) as response:
+            response_body = response.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        error_text = exc.read().decode("utf-8", errors="ignore")
+        raise ValueError(f"PayPal capture failed: {error_text or exc.reason}") from exc
+    except urllib_error.URLError as exc:
+        raise ValueError(f"PayPal is unreachable: {exc.reason}") from exc
+
+    capture = json.loads(response_body)
+    if capture.get("status") != "COMPLETED":
+        raise ValueError("PayPal capture is not completed.")
+    return capture
+
+
+def _paypal_approve_url(order: dict[str, Any]) -> str:
+    links = order.get("links") or []
+    fallback_href = ""
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        rel = str(link.get("rel", "")).strip().lower()
+        href = str(link.get("href", "")).strip()
+        if not href:
+            continue
+        if rel == "payer-action":
+            return href
+        if rel == "approve":
+            fallback_href = href
+    if fallback_href:
+        return fallback_href
+    available_rels = ", ".join(
+        str(link.get("rel", "")).strip()
+        for link in links
+        if isinstance(link, dict) and str(link.get("rel", "")).strip()
+    )
+    if available_rels:
+        raise ValueError(f"PayPal response missing approval link. Available links: {available_rels}")
+    raise ValueError("PayPal response missing approval link. No HATEOAS links returned.")
+
+
+def _extract_paypal_capture_id(capture: dict[str, Any]) -> str:
+    capture_units = capture.get("purchase_units") or []
+    if not capture_units or not isinstance(capture_units[0], dict):
+        return ""
+    capture_records = capture_units[0].get("payments", {}).get("captures", [])
+    if not capture_records or not isinstance(capture_records[0], dict):
+        return ""
+    return str(capture_records[0].get("id", "")).strip()
+
+
+def _finalize_paypal_payment(order_id: str, capture: dict[str, Any]) -> None:
+    pending_payment = session.get("pending_payment")
+    if not pending_payment or not isinstance(pending_payment, dict):
+        raise ValueError("No pending payment found.")
+
+    if order_id != pending_payment.get("order_id"):
+        raise ValueError("Order id mismatch for pending payment.")
+
+    payment_id = _extract_paypal_capture_id(capture)
+    if not payment_id:
+        payment_id = f"PP-{uuid.uuid4().hex[:12].upper()}"
+
+    customer_name = str(pending_payment.get("customer", {}).get("name", "Guest Customer"))
+    items = pending_payment.get("items", [])
+    items_bought = ", ".join(f"{item['name']} x{item['quantity']}" for item in items)
+
+    sales = _read_table("store_sales")
+    sales.append(
+        {
+            "transaction_id": f"TXN-{uuid.uuid4().hex[:10].upper()}",
+            "customer_name": customer_name,
+            "items_bought": items_bought,
+            "total_amount": pending_payment.get("total_amount", 0.0),
+            "currency": pending_payment.get("currency", PAYMENT_CURRENCY),
+            "date": datetime.now().isoformat(timespec="seconds"),
+            "payment_order_id": order_id,
+            "payment_id": payment_id,
+            "status": "paid",
+        }
+    )
+    _write_table("store_sales", sales)
+
+    _save_cart_items([])
+    session.pop("undo_cart_snapshot", None)
+    session.pop("pending_payment", None)
+    session.modified = True
 
 
 # ---------- Page routes ----------
@@ -380,7 +574,12 @@ def form():
 
 @app.route("/customer")
 def customer():
-    return render_template("customer.html")
+    return render_template(
+        "customer.html",
+        paypal_client_id=PAYPAL_CLIENT_ID,
+        payment_currency=PAYMENT_CURRENCY,
+        payment_message=request.args.get("payment_message", "").strip(),
+    )
 
 
 @app.route("/checkout-success")
@@ -577,25 +776,25 @@ def checkout():
     if total_amount <= 0:
         return jsonify({"message": "Cart total is zero. Cannot create payment order."}), 400
 
-    amount_minor = int(round(total_amount * 100))
     customer = session.get("customer", {})
     customer_name = str(customer.get("name", "Guest Customer"))
 
     try:
-        order = _create_razorpay_order(
-            amount_minor=amount_minor,
-            receipt=f"rcpt_{uuid.uuid4().hex[:12]}",
-            notes={"customer_name": customer_name, "source": "quickbill_web"},
+        order = _create_paypal_order(
+            total_amount=total_amount,
+            customer_name=customer_name,
+            return_url=url_for("paypal_return", _external=True),
+            cancel_url=url_for("paypal_cancel", _external=True),
         )
+        approve_url = _paypal_approve_url(order)
     except ValueError as exc:
         return jsonify({"message": str(exc)}), 400
 
-    # Save immutable checkout snapshot for post-payment verification.
+    # Save immutable checkout snapshot for post-payment capture.
     session["pending_payment"] = {
         "order_id": order["id"],
-        "amount_minor": order.get("amount", amount_minor),
-        "currency": order.get("currency", PAYMENT_CURRENCY),
         "total_amount": total_amount,
+        "currency": PAYMENT_CURRENCY,
         "customer": customer,
         "items": items,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -605,18 +804,32 @@ def checkout():
     return jsonify(
         {
             "message": "Order created.",
-            "key_id": RAZORPAY_KEY_ID,
             "order_id": order["id"],
-            "amount": order.get("amount", amount_minor),
-            "currency": order.get("currency", PAYMENT_CURRENCY),
-            "name": "QuickBill",
-            "description": "Retail self-checkout payment",
-            "prefill": {
-                "name": customer.get("name", ""),
-                "contact": customer.get("phone", ""),
-            },
+            "approve_url": approve_url,
         }
     )
+
+
+@app.route("/paypal/return")
+def paypal_return():
+    order_id = str(request.args.get("token", "")).strip()
+    if not order_id:
+        return redirect(url_for("customer", payment_message="Missing PayPal order id."))
+
+    try:
+        capture = _capture_paypal_order(order_id=order_id)
+        _finalize_paypal_payment(order_id=order_id, capture=capture)
+    except ValueError as exc:
+        return redirect(url_for("customer", payment_message=str(exc)))
+
+    return redirect(url_for("checkout_success"))
+
+
+@app.route("/paypal/cancel")
+def paypal_cancel():
+    session.pop("pending_payment", None)
+    session.modified = True
+    return redirect(url_for("customer", payment_message="PayPal checkout was cancelled."))
 
 
 @app.route("/verify-payment", methods=["POST"])
@@ -626,45 +839,19 @@ def verify_payment():
         return jsonify({"message": "No pending payment found."}), 400
 
     payload = request.get_json(silent=True) or {}
-    order_id = str(payload.get("razorpay_order_id", "")).strip()
-    payment_id = str(payload.get("razorpay_payment_id", "")).strip()
-    signature = str(payload.get("razorpay_signature", "")).strip()
+    order_id = str(payload.get("paypal_order_id") or payload.get("orderID") or "").strip()
 
-    if not order_id or not payment_id or not signature:
-        return jsonify({"message": "Incomplete payment verification payload."}), 400
+    if not order_id:
+        return jsonify({"message": "Missing PayPal order id."}), 400
 
     if order_id != pending_payment.get("order_id"):
         return jsonify({"message": "Order id mismatch for pending payment."}), 400
 
-    if not _verify_razorpay_signature(order_id=order_id, payment_id=payment_id, signature=signature):
-        return jsonify({"message": "Payment signature validation failed."}), 400
-
-    customer_name = str(pending_payment.get("customer", {}).get("name", "Guest Customer"))
-    items = pending_payment.get("items", [])
-    items_bought = ", ".join(f"{item['name']} x{item['quantity']}" for item in items)
-
-    # Persist final paid transaction only after signature verification passes.
-    sales = _read_table("store_sales")
-    sales.append(
-        {
-            "transaction_id": f"TXN-{uuid.uuid4().hex[:10].upper()}",
-            "customer_name": customer_name,
-            "items_bought": items_bought,
-            "total_amount": pending_payment.get("total_amount", 0.0),
-            "currency": pending_payment.get("currency", PAYMENT_CURRENCY),
-            "date": datetime.now().isoformat(timespec="seconds"),
-            "payment_order_id": order_id,
-            "payment_id": payment_id,
-            "status": "paid",
-        }
-    )
-    _write_table("store_sales", sales)
-
-    # Clear cart once payment is confirmed and recorded.
-    _save_cart_items([])
-    session.pop("undo_cart_snapshot", None)
-    session.pop("pending_payment", None)
-    session.modified = True
+    try:
+        capture = _capture_paypal_order(order_id=order_id)
+        _finalize_paypal_payment(order_id=order_id, capture=capture)
+    except ValueError as exc:
+        return jsonify({"message": str(exc)}), 400
 
     return jsonify(
         {
@@ -674,6 +861,7 @@ def verify_payment():
     )
 
 
+_init_mongodb()
 _ensure_tables()
 
 if __name__ == "__main__":

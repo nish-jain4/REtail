@@ -9,7 +9,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    {% if paypal_client_id %}
+    <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id | urlencode }}&currency={{ payment_currency | urlencode }}&intent=capture"></script>
+    {% endif %}
 </head>
 <body class="page-customer">
     <div class="bg-3d" aria-hidden="true">
@@ -88,7 +90,7 @@
         <div class="pay-strip">
             <button type="button" class="btn btn-secondary clear-cart-btn" id="clearCartBtn">Delete All</button>
             <button type="button" class="btn btn-secondary" id="refreshBtn">Refresh Bill</button>
-            <button type="button" class="btn pay-btn" id="checkoutBtn">Pay Bill</button>
+            <div id="paypal-button-container"></div>
         </div>
     </main>
     <div class="undo-snackbar" id="undoSnackbar" role="status" aria-live="polite">
@@ -98,6 +100,8 @@
     </div>
 
     <script>
+        const PAYPAL_CLIENT_ID = {{ paypal_client_id | default('', true) | tojson }};
+        const PAYMENT_MESSAGE = {{ payment_message | default('', true) | tojson }};
         const itemList = document.getElementById("itemList");
         const cartEmpty = document.getElementById("cartEmpty");
         const cartTotal = document.getElementById("cartTotal");
@@ -108,7 +112,7 @@
         const addItemBtn = document.getElementById("addItemBtn");
         const clearCartBtn = document.getElementById("clearCartBtn");
         const refreshBtn = document.getElementById("refreshBtn");
-        const checkoutBtn = document.getElementById("checkoutBtn");
+        const paypalButtonContainer = document.getElementById("paypal-button-container");
         const recoList = document.getElementById("recoList");
         const recoRefreshBtn = document.getElementById("recoRefreshBtn");
         const scannerStage = document.getElementById("scanner");
@@ -537,44 +541,84 @@
             window.location.href = data.redirect_url || "{{ url_for('checkout_success') }}";
         }
 
-        async function startCheckout() {
-            try {
-                const response = await fetch("{{ url_for('checkout') }}", { method: "POST" });
-                const data = await response.json();
-                if (!response.ok) {
-                    alert(data.message || "Checkout failed.");
-                    return;
-                }
-
-                const options = {
-                    key: data.key_id,
-                    amount: data.amount,
-                    currency: data.currency,
-                    name: data.name,
-                    description: data.description,
-                    order_id: data.order_id,
-                    prefill: data.prefill || {},
-                    handler: async function (paymentPayload) {
-                        try {
-                            await verifyPayment(paymentPayload);
-                        } catch (error) {
-                            alert(error.message);
-                        }
-                    },
-                    theme: { color: "#ff6b2c" }
-                };
-
-                const razorpay = new Razorpay(options);
-                razorpay.on("payment.failed", function (errorPayload) {
-                    const msg = errorPayload && errorPayload.error && errorPayload.error.description
-                        ? errorPayload.error.description
-                        : "Payment failed. Try again.";
-                    alert(msg);
-                });
-                razorpay.open();
-            } catch (error) {
-                alert("Checkout request failed.");
+        async function createCheckoutOrder() {
+            const response = await fetch("{{ url_for('checkout') }}", { method: "POST" });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.message || "Checkout failed.");
             }
+            return data;
+        }
+
+        async function startRedirectCheckout() {
+            try {
+                const data = await createCheckoutOrder();
+                if (!data.approve_url) {
+                    throw new Error("PayPal approval link is missing.");
+                }
+                window.location.href = data.approve_url;
+            } catch (error) {
+                const message = error && error.message ? error.message : "Checkout failed.";
+                addHint.textContent = message;
+            }
+        }
+
+        function renderFallbackCheckoutButton(message) {
+            if (!paypalButtonContainer) {
+                return;
+            }
+
+            paypalButtonContainer.innerHTML = '<button type="button" class="btn pay-btn" id="paypalRedirectBtn">Pay with PayPal Sandbox</button>';
+            const fallbackButton = document.getElementById("paypalRedirectBtn");
+            if (fallbackButton) {
+                fallbackButton.addEventListener("click", startRedirectCheckout);
+            }
+            if (message) {
+                addHint.textContent = message;
+            }
+        }
+
+        function initPaypalButtons() {
+            if (!paypalButtonContainer) {
+                return;
+            }
+
+            if (!PAYPAL_CLIENT_ID) {
+                paypalButtonContainer.innerHTML = '<p class="hint">PayPal is not configured on server. Set PAYPAL_CLIENT_ID.</p>';
+                return;
+            }
+
+            if (!window.paypal) {
+                renderFallbackCheckoutButton("PayPal SDK blocked. Using redirect checkout instead.");
+                return;
+            }
+
+            window.paypal.Buttons({
+                createOrder: async function () {
+                    try {
+                        const data = await createCheckoutOrder();
+                        return data.order_id;
+                    } catch (error) {
+                        const message = error && error.message ? error.message : "Checkout failed.";
+                        addHint.textContent = message;
+                        throw error;
+                    }
+                },
+                onApprove: async function (data) {
+                    try {
+                        await verifyPayment({ paypal_order_id: data.orderID });
+                    } catch (error) {
+                        alert(error.message || "Payment verification failed.");
+                    }
+                },
+                onError: function (error) {
+                    const message = error && error.message ? error.message : "PayPal checkout failed. Try again.";
+                    addHint.textContent = message;
+                    alert(message);
+                }
+            }).render("#paypal-button-container").catch(function () {
+                renderFallbackCheckoutButton("PayPal button render failed. Using redirect checkout instead.");
+            });
         }
 
         function initBackgroundParallax() {
@@ -623,7 +667,6 @@
             }
         });
         refreshBtn.addEventListener("click", loadItems);
-        checkoutBtn.addEventListener("click", startCheckout);
         recoRefreshBtn.addEventListener("click", loadRecommendations);
         toggleScannerBtn.addEventListener("click", () => {
             if (scannerActive) {
@@ -692,6 +735,10 @@
 
         initBackgroundParallax();
         enableTilt();
+        if (PAYMENT_MESSAGE) {
+            addHint.textContent = PAYMENT_MESSAGE;
+        }
+        initPaypalButtons();
         loadRecommendations();
         loadItems();
     </script>
