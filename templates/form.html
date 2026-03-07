@@ -3,22 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payment Form</title>
-    <link rel="stylesheet" href="{{url_for('static',filename='form.css') }}">
+    <title>Sign Up – QuickBill</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
-<body>
-    <div class="form-container">
-        <h1>User Details</h1>
-        <!--<form action="customer.html" method="GET"> -->
-            <form action="/submit_form" method="post">
-            <label for="name">Full Name</label>
-            <input type="text" id="name" name="name" required>
+<body class="page-form">
+    <header class="header compact">
+        <a href="{{ url_for('index') }}" class="logo-wrap">
+            <img src="{{ url_for('static', filename='logo03.png') }}" alt="QuickBill" class="logo">
+        </a>
+        <a href="{{ url_for('index') }}" class="back-link">← Home</a>
+    </header>
 
-            <label for="phone">Phone Number</label>
-            <input type="tel" id="phone" name="phone" required>
+    <main class="form-main">
+        <div class="form-card">
+            <h1>Create Account</h1>
+            <p class="form-desc">Enter your details to get started with QuickBill.</p>
 
-            <button type="submit" class="btn">Proceed Shopping</button>
-        </form>
-    </div>
+            <form action="{{ url_for('submit_form') }}" method="POST" class="form" id="signupForm">
+                <label for="name">Full Name</label>
+                <input type="text" id="name" name="name" required placeholder="Your full name" autocomplete="name">
+
+                <label for="phone">Phone Number</label>
+                <input type="tel" id="phone" name="phone" required placeholder="e.g. +1 234 567 8900" autocomplete="tel">
+
+                <div class="form-error" id="formError" role="alert" aria-live="polite"></div>
+
+                <button type="submit" class="btn btn-primary btn-full">Proceed to Shopping</button>
+            </form>
+
+            <p class="form-footer">
+                Already have an account? <a href="{{ url_for('customer') }}">Start shopping</a>
+            </p>
+        </div>
+    </main>
+
+    <script>
+        document.getElementById('signupForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const form = this;
+            const errEl = document.getElementById('formError');
+            errEl.textContent = '';
+            const fd = new FormData(form);
+            fd.set('phone', document.getElementById('phone').value);
+            fd.set('mobile_number', document.getElementById('phone').value);
+
+            fetch('{{ url_for("submit_form") }}', {
+                method: 'POST',
+                body: fd
+            })
+            .then(function(r) {
+                if (r.redirected) {
+                    window.location.href = r.url;
+                    return;
+                }
+                return r.text().then(function(t) {
+                    if (r.ok) window.location.href = '{{ url_for("index") }}';
+                    else throw new Error(t || 'Signup failed');
+                });
+            })
+            .catch(function(msg) {
+                errEl.textContent = msg.message || 'Something went wrong.';
+            });
+        });
+    </script>
 </body>
 </html>
