@@ -3,11 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<<<<<<< HEAD
     <title>Shopping – QuickBill</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+=======
+    <title>Scan Barcode</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='customer.css') }}">
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+>>>>>>> ecb89e5536cd92c789624af5a280c8360e09c579
 </head>
 <body class="page-customer">
     <header class="header compact">
@@ -20,6 +26,7 @@
         </nav>
     </header>
 
+<<<<<<< HEAD
     <main class="customer-main">
         <aside class="cart-panel">
             <h2>Your Cart</h2>
@@ -143,6 +150,109 @@
         });
 
         loadItems();
+=======
+        <!-- Scanner Section -->
+        <div class="scan-container">
+            <h2>Scan Your Item</h2>
+            <p>Place your barcode in front of the camera to scan.</p>
+            <div id="scanner">[Camera will be integrated here]</div>
+            <h3 id="cartTotal">Total: INR 0.00</h3>
+            <button onclick="finishProcess()">Pay Now</button>
+            <button onclick="scanNext()">Refresh Items</button>
+        </div>
+    </div>
+
+    <script>
+        function formatAmount(amount, currency) {
+            return new Intl.NumberFormat("en-IN", {
+                style: "currency",
+                currency: currency || "INR"
+            }).format(amount || 0);
+        }
+
+        async function scanNext() {
+            const response = await fetch("/get_items");
+            const data = await response.json();
+            const items = data.items || [];
+            const itemList = document.getElementById("itemList");
+            const total = data.total_amount || 0;
+            const currency = data.currency || "INR";
+
+            itemList.innerHTML = "";
+
+            if (!items.length) {
+                const li = document.createElement("li");
+                li.textContent = "No items scanned yet.";
+                itemList.appendChild(li);
+            }
+
+            items.forEach(item => {
+                const li = document.createElement("li");
+                li.textContent = `${item["Item Name"]} x${item["Quantity"]} - ${formatAmount(item["Line Total"], currency)}`;
+                itemList.appendChild(li);
+            });
+
+            document.getElementById("cartTotal").textContent = `Total: ${formatAmount(total, currency)}`;
+        }
+
+        async function verifyPayment(payload) {
+            const response = await fetch("/verify-payment", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.message || "Payment verification failed.");
+            }
+
+            alert(data.message || "Payment completed.");
+            window.location.href = "{{ url_for('index') }}";
+        }
+
+        async function finishProcess() {
+            try {
+                const checkoutResponse = await fetch("/checkout", { method: "POST" });
+                const checkoutData = await checkoutResponse.json();
+
+                if (!checkoutResponse.ok) {
+                    alert(checkoutData.message || "Unable to start checkout.");
+                    return;
+                }
+
+                const options = {
+                    key: checkoutData.key_id,
+                    amount: checkoutData.amount,
+                    currency: checkoutData.currency,
+                    name: checkoutData.name,
+                    description: checkoutData.description,
+                    order_id: checkoutData.order_id,
+                    prefill: checkoutData.prefill || {},
+                    handler: async function (response) {
+                        try {
+                            await verifyPayment(response);
+                        } catch (error) {
+                            alert(error.message || "Payment verification failed.");
+                        }
+                    },
+                    theme: {
+                        color: "#ff4d4d"
+                    }
+                };
+
+                const razorpayInstance = new Razorpay(options);
+                razorpayInstance.on("payment.failed", function (response) {
+                    alert(response.error.description || "Payment failed. Please try again.");
+                });
+                razorpayInstance.open();
+            } catch (error) {
+                alert(error.message || "Checkout request failed.");
+            }
+        }
+
+        scanNext();
+>>>>>>> ecb89e5536cd92c789624af5a280c8360e09c579
     </script>
 </body>
 </html>
