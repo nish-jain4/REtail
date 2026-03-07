@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Up – QuickBill</title>
+    <title>Sign Up - QuickBill</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -14,7 +14,7 @@
         <a href="{{ url_for('index') }}" class="logo-wrap">
             <img src="{{ url_for('static', filename='logo03.png') }}" alt="QuickBill" class="logo">
         </a>
-        <a href="{{ url_for('index') }}" class="back-link">← Home</a>
+        <a href="{{ url_for('index') }}" class="back-link">&larr; Home</a>
     </header>
 
     <main class="form-main">
@@ -41,32 +41,37 @@
     </main>
 
     <script>
-        document.getElementById('signupForm').addEventListener('submit', function(e) {
-            e.preventDefault();
+        document.getElementById("signupForm").addEventListener("submit", function (event) {
+            event.preventDefault();
             const form = this;
-            const errEl = document.getElementById('formError');
-            errEl.textContent = '';
-            const fd = new FormData(form);
-            fd.set('phone', document.getElementById('phone').value);
-            fd.set('mobile_number', document.getElementById('phone').value);
+            const errorElement = document.getElementById("formError");
+            errorElement.textContent = "";
 
-            fetch('{{ url_for("submit_form") }}', {
-                method: 'POST',
-                body: fd
+            const formData = new FormData(form);
+            const phoneValue = document.getElementById("phone").value;
+            formData.set("phone", phoneValue);
+            formData.set("mobile_number", phoneValue);
+
+            fetch("{{ url_for('submit_form') }}", {
+                method: "POST",
+                body: formData
             })
-            .then(function(r) {
-                if (r.redirected) {
-                    window.location.href = r.url;
-                    return;
-                }
-                return r.text().then(function(t) {
-                    if (r.ok) window.location.href = '{{ url_for("index") }}';
-                    else throw new Error(t || 'Signup failed');
+                .then((response) => {
+                    if (response.redirected) {
+                        window.location.href = response.url;
+                        return null;
+                    }
+                    return response.text().then((text) => {
+                        if (!response.ok) {
+                            throw new Error(text || "Signup failed");
+                        }
+                        window.location.href = "{{ url_for('customer') }}";
+                        return null;
+                    });
+                })
+                .catch((error) => {
+                    errorElement.textContent = error.message || "Something went wrong.";
                 });
-            })
-            .catch(function(msg) {
-                errEl.textContent = msg.message || 'Something went wrong.';
-            });
         });
     </script>
 </body>

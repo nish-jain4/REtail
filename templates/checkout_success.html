@@ -3,19 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Thank You – QuickBill</title>
+    <title>Thank You - QuickBill</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body class="page-checkout">
-    <main class="checkout-success">
-        <div class="success-icon" aria-hidden="true">✓</div>
-        <h1>Thank You!</h1>
-        <p>Your payment was successful. Thanks for shopping with QuickBill.</p>
-        <a href="{{ url_for('index') }}" class="btn btn-primary">Back to Home</a>
-        <a href="{{ url_for('customer') }}" class="btn btn-secondary">Shop Again</a>
+    <main>
+        <div class="checkout-success">
+            <div class="success-icon" aria-hidden="true">&#10003;</div>
+            <h1>Payment Completed</h1>
+            <p>Your bill has been generated successfully. Thanks for shopping with QuickBill.</p>
+            <a href="{{ url_for('index') }}" class="btn btn-primary">Back to Home</a>
+            <a href="{{ url_for('customer') }}" class="btn btn-secondary">Shop Again</a>
+        </div>
     </main>
 </body>
 </html>

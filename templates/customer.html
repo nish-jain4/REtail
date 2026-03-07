@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shopping – QuickBill</title>
+    <title>Shopping - QuickBill</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </head>
 <body class="page-customer">
     <header class="header compact">
@@ -26,14 +27,14 @@
             <ul class="cart-list" id="itemList" aria-live="polite">
                 <li class="cart-empty" id="cartEmpty">No items yet. Scan or add products.</li>
             </ul>
-            <div class="cart-total" id="cartTotal" aria-hidden="true"></div>
+            <div class="cart-total" id="cartTotal"></div>
         </aside>
 
         <section class="scan-section">
             <h2>Scan Your Items</h2>
-            <p class="scan-desc">Place your barcode in front of the camera to scan, or add items manually.</p>
+            <p class="scan-desc">Use barcode/product id for now. Camera scanner can be connected here.</p>
 
-            <div class="manual-add" id="manualAdd">
+            <div class="manual-add">
                 <label for="barcodeInput">Add by Barcode / Product ID</label>
                 <div class="add-row">
                     <input type="text" id="barcodeInput" placeholder="Enter barcode or product ID" autocomplete="off">
@@ -44,103 +45,164 @@
             </div>
 
             <div class="scanner-placeholder" id="scanner">
-                <span>Camera integration ready</span>
-                <small>Backend can connect barcode scanner here</small>
+                <span>Scanner Placeholder</span>
+                <small>Backend API is ready for barcode feed integration.</small>
             </div>
 
             <div class="customer-actions">
                 <button type="button" class="btn btn-secondary" id="refreshBtn">Refresh Cart</button>
-                <button type="button" class="btn btn-primary" id="checkoutBtn">Checkout</button>
+                <button type="button" class="btn btn-primary" id="checkoutBtn">Pay Now</button>
             </div>
         </section>
     </main>
 
     <script>
-        const itemList = document.getElementById('itemList');
-        const cartEmpty = document.getElementById('cartEmpty');
-        const cartTotal = document.getElementById('cartTotal');
-        const checkoutBtn = document.getElementById('checkoutBtn');
-        const refreshBtn = document.getElementById('refreshBtn');
-        const addItemBtn = document.getElementById('addItemBtn');
-        const barcodeInput = document.getElementById('barcodeInput');
-        const qtyInput = document.getElementById('qtyInput');
-        const addHint = document.getElementById('addHint');
+        // UI state references.
+        const itemList = document.getElementById("itemList");
+        const cartEmpty = document.getElementById("cartEmpty");
+        const cartTotal = document.getElementById("cartTotal");
+        const addHint = document.getElementById("addHint");
+        const barcodeInput = document.getElementById("barcodeInput");
+        const qtyInput = document.getElementById("qtyInput");
+        const addItemBtn = document.getElementById("addItemBtn");
+        const refreshBtn = document.getElementById("refreshBtn");
+        const checkoutBtn = document.getElementById("checkoutBtn");
 
-        function renderCart(items) {
-            if (!items || items.length === 0) {
-                cartEmpty.style.display = 'block';
-                cartTotal.textContent = '';
-                itemList.innerHTML = '';
-                itemList.appendChild(cartEmpty);
-                return;
-            }
-            cartEmpty.style.display = 'none';
-            let total = 0;
-            const lis = items.map(item => {
-                const price = Number(item.Price) || 0;
-                const qty = Number(item.quantity) || 1;
-                total += price * qty;
-                return `<li class="cart-item"><span class="cart-item-name">${escapeHtml(item["Item Name"])}</span> <span class="cart-item-price">$${price.toFixed(2)} × ${qty}</span></li>`;
-            });
-            itemList.innerHTML = lis.join('');
-            cartTotal.textContent = `Total: $${total.toFixed(2)}`;
-        }
-
-        function escapeHtml(str) {
-            const div = document.createElement('div');
-            div.textContent = str;
+        function escapeHtml(value) {
+            const div = document.createElement("div");
+            div.textContent = value || "";
             return div.innerHTML;
         }
 
-        function loadItems() {
-            fetch('{{ url_for("get_items") }}')
-                .then(r => r.json())
-                .then(items => renderCart(items))
-                .catch(() => renderCart([]));
+        function formatCurrency(amount, currency) {
+            return new Intl.NumberFormat("en-IN", {
+                style: "currency",
+                currency: currency || "INR"
+            }).format(Number(amount || 0));
         }
 
-        checkoutBtn.addEventListener('click', function() {
-            fetch('{{ url_for("checkout") }}', { method: 'POST' })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.success !== false) {
-                        window.location.href = '{{ url_for("checkout_form") }}';
-                    } else {
-                        alert(data.message || 'Checkout failed.');
-                    }
-                })
-                .catch(() => alert('Checkout request failed.'));
-        });
-
-        refreshBtn.addEventListener('click', loadItems);
-
-        addItemBtn.addEventListener('click', function() {
-            const barcode = (barcodeInput.value || '').trim();
-            const qty = Math.max(1, parseInt(qtyInput.value, 10) || 1);
-            if (!barcode) {
-                addHint.textContent = 'Enter a barcode or product ID.';
+        function renderCart(items, totalAmount, currency) {
+            itemList.innerHTML = "";
+            if (!items || items.length === 0) {
+                cartEmpty.style.display = "block";
+                itemList.appendChild(cartEmpty);
+                cartTotal.textContent = "Total: " + formatCurrency(0, currency);
                 return;
             }
-            addHint.textContent = '';
-            fetch('{{ url_for("add_item") }}', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ product_id: barcode, quantity: qty })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.error) {
-                    addHint.textContent = data.error;
-                } else {
-                    addHint.textContent = 'Added: ' + (data["Item Name"] || data.product_name) + '.';
-                    barcodeInput.value = '';
-                    loadItems();
-                }
-            })
-            .catch(() => {
-                addHint.textContent = 'Add failed. Check backend.';
+
+            cartEmpty.style.display = "none";
+            items.forEach((item) => {
+                const line = Number(item["Line Total"] || 0);
+                const quantity = Number(item["Quantity"] || 1);
+                const li = document.createElement("li");
+                li.className = "cart-item";
+                li.innerHTML = `<span class="cart-item-name">${escapeHtml(item["Item Name"])}</span><span class="cart-item-price">${formatCurrency(line, currency)} x ${quantity}</span>`;
+                itemList.appendChild(li);
             });
-        });
+            cartTotal.textContent = "Total: " + formatCurrency(totalAmount, currency);
+        }
+
+        async function loadItems() {
+            // Pull latest cart snapshot from backend and render totals.
+            try {
+                const response = await fetch("{{ url_for('get_items') }}");
+                const data = await response.json();
+                renderCart(data.items || [], data.total_amount || 0, data.currency || "INR");
+            } catch (error) {
+                renderCart([], 0, "INR");
+            }
+        }
+
+        async function addItem() {
+            // Adds one product line into backend cart storage.
+            const productId = (barcodeInput.value || "").trim();
+            const quantity = Math.max(1, parseInt(qtyInput.value, 10) || 1);
+
+            if (!productId) {
+                addHint.textContent = "Enter a barcode or product ID.";
+                return;
+            }
+
+            addHint.textContent = "";
+            try {
+                const response = await fetch("{{ url_for('add_item') }}", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ product_id: productId, quantity: quantity })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    addHint.textContent = data.error || "Unable to add product.";
+                    return;
+                }
+
+                addHint.textContent = "Added: " + (data["Item Name"] || productId);
+                barcodeInput.value = "";
+                qtyInput.value = "1";
+                await loadItems();
+            } catch (error) {
+                addHint.textContent = "Unable to add product right now.";
+            }
+        }
+
+        async function verifyPayment(payload) {
+            // Server verifies Razorpay signature before final success redirect.
+            const response = await fetch("{{ url_for('verify_payment') }}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.message || "Payment verification failed.");
+            }
+            window.location.href = data.redirect_url || "{{ url_for('checkout_success') }}";
+        }
+
+        async function startCheckout() {
+            // Create order on server, then open Razorpay checkout widget.
+            try {
+                const response = await fetch("{{ url_for('checkout') }}", { method: "POST" });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.message || "Checkout failed.");
+                    return;
+                }
+
+                const options = {
+                    key: data.key_id,
+                    amount: data.amount,
+                    currency: data.currency,
+                    name: data.name,
+                    description: data.description,
+                    order_id: data.order_id,
+                    prefill: data.prefill || {},
+                    handler: async function (paymentPayload) {
+                        try {
+                            await verifyPayment(paymentPayload);
+                        } catch (error) {
+                            alert(error.message);
+                        }
+                    },
+                    theme: { color: "#e94f37" }
+                };
+
+                const razorpay = new Razorpay(options);
+                razorpay.on("payment.failed", function (errorPayload) {
+                    const msg = errorPayload && errorPayload.error && errorPayload.error.description
+                        ? errorPayload.error.description
+                        : "Payment failed. Try again.";
+                    alert(msg);
+                });
+                razorpay.open();
+            } catch (error) {
+                alert("Checkout request failed.");
+            }
+        }
+
+        addItemBtn.addEventListener("click", addItem);
+        refreshBtn.addEventListener("click", loadItems);
+        checkoutBtn.addEventListener("click", startCheckout);
 
         loadItems();
     </script>
