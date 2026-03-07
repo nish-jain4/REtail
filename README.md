@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 # QuickBill
 QuickBill is a self-checkout web app for retail stores. Shoppers can scan items, see the running bill, and pay in-app before leaving the store.
 
@@ -25,3 +26,8 @@ Open `http://127.0.0.1:5000`.
 - `GET /get_items` - returns scanned cart items and total amount.
 - `POST /checkout` - creates a Razorpay order for the current cart.
 - `POST /verify-payment` - verifies Razorpay signature and stores the sale in `store_sales`.
+=======
+# REtail
+
+REtail is your personal cashier in your pocket. It eliminates long queues by allowing users to scan items, track their bills in real time, and pay directly through the app before leaving the store.
+>>>>>>> Stashed changes

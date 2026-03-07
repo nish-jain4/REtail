@@ -1,4 +1,4 @@
-# QuickBill – Backend API Reference
+# REtail – Backend API Reference
 
 This document describes the API contracts the frontend expects. Backend developers can use this to integrate or replace endpoints.
 

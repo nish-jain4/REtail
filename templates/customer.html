@@ -3,8 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<<<<<<< Updated upstream
 <<<<<<< HEAD
     <title>Shopping – QuickBill</title>
+=======
+    <title>Shopping – REtail</title>
+>>>>>>> Stashed changes
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -16,29 +20,44 @@
 >>>>>>> ecb89e5536cd92c789624af5a280c8360e09c579
 </head>
 <body class="page-customer">
+    <div id="bg3d" class="bg-3d" aria-hidden="true"></div>
+
     <header class="header compact">
         <a href="{{ url_for('index') }}" class="logo-wrap">
-            <img src="{{ url_for('static', filename='logo03.png') }}" alt="QuickBill" class="logo">
+            <img src="{{ url_for('static', filename='logo03.png') }}" alt="REtail" class="logo">
         </a>
         <nav class="nav">
-            <a href="{{ url_for('index') }}">Home</a>
-            <a href="{{ url_for('form') }}">Sign Up</a>
+            <a href="{{ url_for('index') }}">Shopping</a>
         </nav>
     </header>
 
 <<<<<<< HEAD
     <main class="customer-main">
-        <aside class="cart-panel">
-            <h2>Your Cart</h2>
-            <ul class="cart-list" id="itemList" aria-live="polite">
-                <li class="cart-empty" id="cartEmpty">No items yet. Scan or add products.</li>
+        <aside class="recommendations-panel">
+            <h2>Recommended for You</h2>
+            <ul class="recommendations-list" id="recommendationsList">
+                <li class="rec-item" data-barcode="0123456789012">
+                    <span class="rec-name">Coca-Cola 500ml</span>
+                    <span class="rec-price">$1.50</span>
+                    <button type="button" class="btn btn-sm rec-add">Add</button>
+                </li>
+                <li class="rec-item" data-barcode="1234567890128">
+                    <span class="rec-name">Lay's Chips</span>
+                    <span class="rec-price">$2.00</span>
+                    <button type="button" class="btn btn-sm rec-add">Add</button>
+                </li>
+                <li class="rec-item" data-barcode="4002293401102">
+                    <span class="rec-name">Nutella 750g</span>
+                    <span class="rec-price">$5.50</span>
+                    <button type="button" class="btn btn-sm rec-add">Add</button>
+                </li>
             </ul>
-            <div class="cart-total" id="cartTotal" aria-hidden="true"></div>
+            <p class="rec-hint">Backend can connect recommendation API</p>
         </aside>
 
         <section class="scan-section">
             <h2>Scan Your Items</h2>
-            <p class="scan-desc">Place your barcode in front of the camera to scan, or add items manually.</p>
+            <p class="scan-desc">Point your camera at a barcode, or add items manually.</p>
 
             <div class="manual-add" id="manualAdd">
                 <label for="barcodeInput">Add by Barcode / Product ID</label>
@@ -50,9 +69,15 @@
                 <p class="hint" id="addHint"></p>
             </div>
 
-            <div class="scanner-placeholder" id="scanner">
-                <span>Camera integration ready</span>
-                <small>Backend can connect barcode scanner here</small>
+            <div class="scanner-wrap">
+                <div id="scanner" class="scanner-view"></div>
+                <div class="scanner-overlay">
+                    <span class="scanner-frame"></span>
+                    <p>Position barcode within frame</p>
+                </div>
+                <div class="scanner-actions">
+                    <button type="button" class="btn btn-secondary" id="toggleCamBtn">Start Camera</button>
+                </div>
             </div>
 
             <div class="customer-actions">
@@ -60,8 +85,94 @@
                 <button type="button" class="btn btn-primary" id="checkoutBtn">Checkout</button>
             </div>
         </section>
+
+        <aside class="cart-panel">
+            <h2>Your Cart</h2>
+            <ul class="cart-list" id="itemList" aria-live="polite">
+                <li class="cart-empty" id="cartEmpty">No items yet. Scan or add products.</li>
+            </ul>
+            <div class="cart-total" id="cartTotal" aria-hidden="true"></div>
+            <div class="bill-card hidden" id="billCard">
+                <div class="bill-label">Your Bill</div>
+                <div class="bill-amount" id="billAmount">$0.00</div>
+            </div>
+        </aside>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script type="importmap">
+    { "imports": { "three": "https://esm.sh/three" } }
+    </script>
+    <script type="module">
+    import * as THREE from 'three';
+
+    const container = document.getElementById('bg3d');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xffffff);
+    const aspect = window.innerWidth / window.innerHeight;
+    const frustumSize = 28;
+    const camera = new THREE.OrthographicCamera(
+        -frustumSize * aspect, frustumSize * aspect,
+        frustumSize, -frustumSize, 0.1, 1000
+    );
+    camera.position.z = 15;
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0xffffff, 1);
+    container.appendChild(renderer.domElement);
+
+    const geometry = new THREE.IcosahedronGeometry(1, 0);
+    const material = new THREE.MeshPhongMaterial({
+        color: 0x06b6d4,
+        emissive: 0x06b6d4,
+        emissiveIntensity: 0.12,
+        transparent: true,
+        opacity: 0.45,
+        wireframe: true
+    });
+    const meshes = [];
+    const spreadX = frustumSize * aspect * 0.9;
+    const spreadY = frustumSize * 0.9;
+    for (let i = 0; i < 12; i++) {
+        const mesh = new THREE.Mesh(geometry, material.clone());
+        mesh.position.set(
+            (Math.random() - 0.5) * spreadX * 2,
+            (Math.random() - 0.5) * spreadY * 2,
+            (Math.random() - 0.5) * 20 - 5
+        );
+        mesh.scale.setScalar(2 + Math.random() * 2.5);
+        mesh.userData = { speed: 0.12 + Math.random() * 0.2, rotY: (Math.random() - 0.5) * 0.02 };
+        scene.add(mesh);
+        meshes.push(mesh);
+    }
+    const light = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(light);
+    const pointLight = new THREE.PointLight(0x06b6d4, 0.6, 100);
+    pointLight.position.set(10, 10, 10);
+    scene.add(pointLight);
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const t = performance.now() * 0.001;
+        meshes.forEach((m, i) => {
+            m.rotation.x += m.userData.speed * 0.01;
+            m.rotation.y += m.userData.rotY;
+            m.position.y += Math.sin(t + i * 0.7) * 0.0015;
+        });
+        renderer.render(scene, camera);
+    }
+    animate();
+    window.addEventListener('resize', () => {
+        const a = window.innerWidth / window.innerHeight;
+        camera.left = -frustumSize * a;
+        camera.right = frustumSize * a;
+        camera.top = frustumSize;
+        camera.bottom = -frustumSize;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+    </script>
     <script>
         const itemList = document.getElementById('itemList');
         const cartEmpty = document.getElementById('cartEmpty');
@@ -72,11 +183,72 @@
         const barcodeInput = document.getElementById('barcodeInput');
         const qtyInput = document.getElementById('qtyInput');
         const addHint = document.getElementById('addHint');
+        const toggleCamBtn = document.getElementById('toggleCamBtn');
+        const billCard = document.getElementById('billCard');
+        const billAmount = document.getElementById('billAmount');
+
+        let html5QrCode = null;
+        let camActive = false;
+
+        function addItemByBarcode(barcode, qty) {
+            qty = qty || 1;
+            fetch('{{ url_for("add_item") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ product_id: barcode, quantity: qty })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    addHint.textContent = data.error;
+                } else {
+                    addHint.textContent = 'Added: ' + (data["Item Name"] || data.product_name) + '.';
+                    addHint.classList.add('success');
+                    setTimeout(() => { addHint.textContent = ''; addHint.classList.remove('success'); }, 2000);
+                    loadItems();
+                }
+            })
+            .catch(() => { addHint.textContent = 'Add failed.'; });
+        }
+
+        function toggleCamera() {
+            if (camActive) {
+                if (html5QrCode && html5QrCode.isScanning) {
+                    html5QrCode.stop().then(() => {
+                        camActive = false;
+                        toggleCamBtn.textContent = 'Start Camera';
+                    });
+                }
+            } else {
+                Html5Qrcode.getCameras().then(cameras => {
+                    if (!cameras || cameras.length === 0) {
+                        addHint.textContent = 'No camera found. Use manual entry.';
+                        return;
+                    }
+                    const camId = cameras[0].id;
+                    html5QrCode = new Html5Qrcode("scanner");
+                    html5QrCode.start(camId, { fps: 10, qrbox: { width: 200, height: 120 } }, (decodedText) => {
+                        addItemByBarcode(decodedText.trim(), parseInt(qtyInput.value, 10) || 1);
+                        html5QrCode.pause();
+                        setTimeout(() => { if (html5QrCode && html5QrCode.isPaused) html5QrCode.resume(); }, 1500);
+                    }).then(() => {
+                        camActive = true;
+                        toggleCamBtn.textContent = 'Stop Camera';
+                        addHint.textContent = '';
+                    }).catch(err => {
+                        addHint.textContent = 'Camera error: ' + (err.message || 'Please allow camera access.');
+                    });
+                });
+            }
+        }
+
+        toggleCamBtn.addEventListener('click', toggleCamera);
 
         function renderCart(items) {
             if (!items || items.length === 0) {
                 cartEmpty.style.display = 'block';
                 cartTotal.textContent = '';
+                billCard.classList.add('hidden');
                 itemList.innerHTML = '';
                 itemList.appendChild(cartEmpty);
                 return;
@@ -91,6 +263,8 @@
             });
             itemList.innerHTML = lis.join('');
             cartTotal.textContent = `Total: $${total.toFixed(2)}`;
+            billAmount.textContent = '$' + total.toFixed(2);
+            billCard.classList.remove('hidden');
         }
 
         function escapeHtml(str) {
@@ -111,6 +285,7 @@
                 .then(r => r.json())
                 .then(data => {
                     if (data.success !== false) {
+                        if (camActive && html5QrCode) html5QrCode.stop();
                         window.location.href = '{{ url_for("checkout_form") }}';
                     } else {
                         alert(data.message || 'Checkout failed.');
@@ -129,23 +304,14 @@
                 return;
             }
             addHint.textContent = '';
-            fetch('{{ url_for("add_item") }}', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ product_id: barcode, quantity: qty })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.error) {
-                    addHint.textContent = data.error;
-                } else {
-                    addHint.textContent = 'Added: ' + (data["Item Name"] || data.product_name) + '.';
-                    barcodeInput.value = '';
-                    loadItems();
-                }
-            })
-            .catch(() => {
-                addHint.textContent = 'Add failed. Check backend.';
+            addItemByBarcode(barcode, qty);
+            barcodeInput.value = '';
+        });
+
+        document.querySelectorAll('.rec-add').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const barcode = this.closest('.rec-item').dataset.barcode;
+                addItemByBarcode(barcode, 1);
             });
         });
 

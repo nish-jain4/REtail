@@ -1,5 +1,5 @@
 """
-QuickBill - Main Flask Application
+REtail - Main Flask Application
 Backend API routes for frontend connectivity.
 """
 from flask import Flask, render_template, request, redirect, url_for, jsonify
@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "quickbill-dev-key")
+app.secret_key = os.environ.get("SECRET_KEY", "retail-dev-key")
 
 # File paths
 EXCEL_FILE = "users.xlsx"
@@ -48,17 +48,12 @@ def save_cart(df):
 # ---- Pages ----
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("customer.html")
 
 
 @app.route("/customer")
 def customer():
     return render_template("customer.html")
-
-
-@app.route("/form")
-def form():
-    return render_template("form.html")
 
 
 @app.route("/checkout-success")
