@@ -44,6 +44,13 @@ def _env_int(name: str, default: int) -> int:
     except (TypeError, ValueError):
         return default
 
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(str(os.getenv(name, default)).strip())
+    except (TypeError, ValueError):
+        return default
+
 # Canonical columns for each persisted table.
 TABLE_COLUMNS: dict[str, list[str]] = {
     "users": ["user_id", "Name", "Phone Number", "Email", "Password Hash", "Role", "created_at", "last_login_at"],
@@ -109,7 +116,15 @@ PRODUCT_IMPORT_COLUMNS = {
 PAYPAL_CLIENT_ID = "AT4YjVQk1fNnJTW1sdd7KRMlB5OVYTBAuKh4dFp76BUiAmLiqbPP8VlJmrZhhZb5-w_0fRzNQG3BLTrw"
 PAYPAL_CLIENT_SECRET = "EDumKbVywv9AnZGKWHwCtl9o9UkEpMO_6hVbvuxk64_bbxEu303Se5pTEJAiy0KpOy4dX2G6R7rldyPa"
 PAYPAL_BASE_URL = os.getenv("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com").strip()
-PAYMENT_CURRENCY = os.getenv("PAYMENT_CURRENCY", "INR").strip().upper() or "INR"
+DISPLAY_CURRENCY = "INR"
+PAYPAL_DEFAULT_CURRENCY = "USD"
+PAYPAL_CURRENCY = os.getenv("PAYMENT_CURRENCY", PAYPAL_DEFAULT_CURRENCY).strip().upper() or PAYPAL_DEFAULT_CURRENCY
+# This checkout flow should avoid INR because PayPal rejects it for the current sandbox setup.
+if PAYPAL_CURRENCY == "INR":
+    PAYPAL_CURRENCY = PAYPAL_DEFAULT_CURRENCY
+INR_PER_USD = _env_float("INR_PER_USD", 83.0)
+if INR_PER_USD <= 0:
+    INR_PER_USD = 83.0
 MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "quickbill").strip() or "quickbill"
 LOW_STOCK_DEFAULT_THRESHOLD = _env_int("LOW_STOCK_DEFAULT_THRESHOLD", 10)
@@ -984,6 +999,19 @@ def _cart_total(items: list[dict[str, Any]]) -> float:
     return round(sum(_to_float(item.get("line_total"), 0.0) for item in items), 2)
 
 
+def _paypal_charge_amount(display_total_amount: float) -> float:
+    total_amount = round(max(_to_float(display_total_amount, 0.0), 0.0), 2)
+    if DISPLAY_CURRENCY == "INR" and PAYPAL_CURRENCY == "USD":
+        return max(round(total_amount / INR_PER_USD, 2), 0.01)
+    return total_amount
+
+
+def _payment_note() -> str:
+    if DISPLAY_CURRENCY == "INR" and PAYPAL_CURRENCY == "USD":
+        return f"Cart values are shown in INR. PayPal charges in USD at 1 USD = Rs. {INR_PER_USD:.2f}."
+    return ""
+
+
 def _snapshot_cart_for_undo(items: list[dict[str, Any]]) -> None:
     session["undo_cart_snapshot"] = {
         "items": [dict(item) for item in items],
@@ -1040,7 +1068,7 @@ def _create_paypal_order(
                     "reference_id": f"retail-{uuid.uuid4().hex[:10]}",
                     "description": f"REtail checkout for {customer_name}",
                     "amount": {
-                        "currency_code": PAYMENT_CURRENCY,
+                        "currency_code": PAYPAL_CURRENCY,
                         "value": f"{total_amount:.2f}",
                     },
                 }
@@ -1173,7 +1201,7 @@ def _finalize_paypal_payment(order_id: str, capture: dict[str, Any]) -> None:
             "customer_name": customer_name,
             "items_bought": items_bought,
             "total_amount": pending_payment.get("total_amount", 0.0),
-            "currency": pending_payment.get("currency", PAYMENT_CURRENCY),
+            "currency": pending_payment.get("currency", DISPLAY_CURRENCY),
             "date": datetime.now().isoformat(timespec="seconds"),
             "payment_order_id": order_id,
             "payment_id": payment_id,
@@ -1292,7 +1320,9 @@ def customer():
     return render_template(
         "customer.html",
         paypal_client_id=PAYPAL_CLIENT_ID,
-        payment_currency=PAYMENT_CURRENCY,
+        paypal_currency=PAYPAL_CURRENCY,
+        display_currency=DISPLAY_CURRENCY,
+        payment_note=_payment_note(),
         payment_message=request.args.get("payment_message", "").strip(),
         current_user=_current_user(),
         is_admin_authenticated=_is_admin_authenticated(),
@@ -1473,7 +1503,7 @@ def get_items():
         {
             "items": payload,
             "total_amount": _cart_total(items),
-            "currency": PAYMENT_CURRENCY,
+            "currency": DISPLAY_CURRENCY,
         }
     )
 
@@ -1630,13 +1660,14 @@ def checkout():
     total_amount = _cart_total(items)
     if total_amount <= 0:
         return jsonify({"message": "Cart total is zero. Cannot create payment order."}), 400
+    paypal_total_amount = _paypal_charge_amount(total_amount)
 
     customer = session.get("customer", {})
     customer_name = str(customer.get("name", "Guest Customer"))
 
     try:
         order = _create_paypal_order(
-            total_amount=total_amount,
+            total_amount=paypal_total_amount,
             customer_name=customer_name,
             return_url=url_for("paypal_return", _external=True),
             cancel_url=url_for("paypal_cancel", _external=True),
@@ -1649,7 +1680,9 @@ def checkout():
     session["pending_payment"] = {
         "order_id": order["id"],
         "total_amount": total_amount,
-        "currency": PAYMENT_CURRENCY,
+        "currency": DISPLAY_CURRENCY,
+        "paypal_total_amount": paypal_total_amount,
+        "paypal_currency": PAYPAL_CURRENCY,
         "customer": customer,
         "items": items,
         "created_at": _utc_now_iso(),
@@ -1661,6 +1694,8 @@ def checkout():
             "message": "Order created.",
             "order_id": order["id"],
             "approve_url": approve_url,
+            "display_currency": DISPLAY_CURRENCY,
+            "paypal_currency": PAYPAL_CURRENCY,
         }
     )
 

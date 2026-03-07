@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
     {% if paypal_client_id %}
-    <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id | urlencode }}&currency={{ payment_currency | urlencode }}&intent=capture"></script>
+    <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id | urlencode }}&currency={{ paypal_currency | urlencode }}&intent=capture"></script>
     {% endif %}
 </head>
 <body class="page-customer">
@@ -118,6 +118,9 @@
                 </div>
                 <div class="bill-pay">
                     <div id="paypal-button-container"></div>
+                    {% if payment_note %}
+                    <p class="hint">{{ payment_note }}</p>
+                    {% endif %}
                 </div>
             </aside>
         </div>
@@ -130,7 +133,8 @@
 
     <script>
         const PAYPAL_CLIENT_ID = {{ paypal_client_id | default('', true) | tojson }};
-        const PAYMENT_CURRENCY = {{ payment_currency | default('INR', true) | tojson }};
+        const DISPLAY_CURRENCY = {{ display_currency | default('INR', true) | tojson }};
+        const PAYPAL_CURRENCY = {{ paypal_currency | default('USD', true) | tojson }};
         const PAYMENT_MESSAGE = {{ payment_message | default('', true) | tojson }};
         const itemList = document.getElementById("itemList");
         const cartEmpty = document.getElementById("cartEmpty");
@@ -249,9 +253,12 @@
             }, 7000);
         }
 
-        const currencyFormatter = new Intl.NumberFormat("en-IN", {
+        const currencyCode = (DISPLAY_CURRENCY || "INR").toUpperCase();
+        const currencyLocale = currencyCode === "USD" ? "en-US" : "en-IN";
+
+        const currencyFormatter = new Intl.NumberFormat(currencyLocale, {
             style: "currency",
-            currency: PAYMENT_CURRENCY || "INR",
+            currency: currencyCode,
             currencyDisplay: "symbol",
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
@@ -260,7 +267,7 @@
         function formatCurrency(amount) {
             const value = Number(amount || 0);
             let formatted = currencyFormatter.format(Number.isFinite(value) ? value : 0);
-            if ((PAYMENT_CURRENCY || "INR").toUpperCase() === "INR") {
+            if (currencyCode === "INR") {
                 // Keep compact INR style like "₹500.00" without extra gaps.
                 formatted = formatted.replace(/\s+/g, "");
             }
