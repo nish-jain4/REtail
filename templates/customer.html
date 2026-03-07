@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scan Barcode</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='customer.css') }}">
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </head>
 <body>
     <img src="{{ url_for('static', filename='logo03.png') }}" alt="Logo" class="logo">
@@ -21,36 +22,101 @@
             <h2>Scan Your Item</h2>
             <p>Place your barcode in front of the camera to scan.</p>
             <div id="scanner">[Camera will be integrated here]</div>
-            <button onclick="finishProcess()">Finish</button>
-            <button onclick="scanNext()">Next</button>
+            <h3 id="cartTotal">Total: INR 0.00</h3>
+            <button onclick="finishProcess()">Pay Now</button>
+            <button onclick="scanNext()">Refresh Items</button>
         </div>
     </div>
 
     <script>
-        function scanNext() {
-            fetch('/get_items')
-                .then(response => response.json())
-                .then(items => {
-                    let itemList = document.getElementById("itemList");
-                    itemList.innerHTML = "";
-                    items.forEach(item => {
-                        let li = document.createElement("li");
-                        li.textContent = `${item["Item Name"]} - $${item["Price"]}`;
-                        itemList.appendChild(li);
-                    });
-                });
+        function formatAmount(amount, currency) {
+            return new Intl.NumberFormat("en-IN", {
+                style: "currency",
+                currency: currency || "INR"
+            }).format(amount || 0);
         }
 
-        function finishProcess() {
-            fetch('/checkout', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    alert(data.message);
-                    window.location.href = "{{ url_for('checkout_form') }}";  // Redirect to main page
-                });
+        async function scanNext() {
+            const response = await fetch("/get_items");
+            const data = await response.json();
+            const items = data.items || [];
+            const itemList = document.getElementById("itemList");
+            const total = data.total_amount || 0;
+            const currency = data.currency || "INR";
+
+            itemList.innerHTML = "";
+
+            if (!items.length) {
+                const li = document.createElement("li");
+                li.textContent = "No items scanned yet.";
+                itemList.appendChild(li);
+            }
+
+            items.forEach(item => {
+                const li = document.createElement("li");
+                li.textContent = `${item["Item Name"]} x${item["Quantity"]} - ${formatAmount(item["Line Total"], currency)}`;
+                itemList.appendChild(li);
+            });
+
+            document.getElementById("cartTotal").textContent = `Total: ${formatAmount(total, currency)}`;
         }
 
-        // Load scanned items on page load
+        async function verifyPayment(payload) {
+            const response = await fetch("/verify-payment", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.message || "Payment verification failed.");
+            }
+
+            alert(data.message || "Payment completed.");
+            window.location.href = "{{ url_for('index') }}";
+        }
+
+        async function finishProcess() {
+            try {
+                const checkoutResponse = await fetch("/checkout", { method: "POST" });
+                const checkoutData = await checkoutResponse.json();
+
+                if (!checkoutResponse.ok) {
+                    alert(checkoutData.message || "Unable to start checkout.");
+                    return;
+                }
+
+                const options = {
+                    key: checkoutData.key_id,
+                    amount: checkoutData.amount,
+                    currency: checkoutData.currency,
+                    name: checkoutData.name,
+                    description: checkoutData.description,
+                    order_id: checkoutData.order_id,
+                    prefill: checkoutData.prefill || {},
+                    handler: async function (response) {
+                        try {
+                            await verifyPayment(response);
+                        } catch (error) {
+                            alert(error.message || "Payment verification failed.");
+                        }
+                    },
+                    theme: {
+                        color: "#ff4d4d"
+                    }
+                };
+
+                const razorpayInstance = new Razorpay(options);
+                razorpayInstance.on("payment.failed", function (response) {
+                    alert(response.error.description || "Payment failed. Please try again.");
+                });
+                razorpayInstance.open();
+            } catch (error) {
+                alert(error.message || "Checkout request failed.");
+            }
+        }
+
         scanNext();
     </script>
 </body>
