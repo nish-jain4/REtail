@@ -1,0 +1,3 @@
+cart_id,product_id,product_name,quantity,price,total_cost
+default,0123456789012,Coca-Cola 500ml,1,1.5,1.5
+default,1234567890128,Lays Chips,2,2.0,4.0

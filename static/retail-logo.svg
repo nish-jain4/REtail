@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="retailLogoTitle">
+  <title id="retailLogoTitle">REtail logo</title>
+  <defs>
+    <linearGradient id="cartGrad" x1="20" y1="20" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffc95a"/>
+      <stop offset="0.55" stop-color="#ff9a42"/>
+      <stop offset="1" stop-color="#ff6f2f"/>
+    </linearGradient>
+    <linearGradient id="shineGrad" x1="34" y1="44" x2="94" y2="74" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffd889" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#ffd889" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <g fill="none" stroke-linecap="round">
+    <path d="M44 42c3-12 14-20 28-20 16 0 28 12 28 28" stroke="url(#cartGrad)" stroke-width="9"/>
+    <path d="M30 50h72l-10 34H42L30 50z" fill="url(#cartGrad)" stroke="#f0aa50" stroke-width="1.5"/>
+    <path d="M30 50h72l-10 34H42L30 50z" fill="url(#shineGrad)" opacity="0.65"/>
+    <path d="M17 52h13" stroke="#ffbf5d" stroke-width="6"/>
+    <path d="M11 61h20" stroke="#ffbf5d" stroke-width="6"/>
+    <path d="M7 70h22" stroke="#ffbf5d" stroke-width="6"/>
+    <path d="M22 79h15" stroke="#ffbf5d" stroke-width="6"/>
+  </g>
+
+  <g>
+    <circle cx="54" cy="95" r="11" fill="#11192a" stroke="#3a4d69" stroke-width="2"/>
+    <circle cx="84" cy="95" r="11" fill="#11192a" stroke="#3a4d69" stroke-width="2"/>
+    <circle cx="54" cy="95" r="4" fill="#0a0f18"/>
+    <circle cx="84" cy="95" r="4" fill="#0a0f18"/>
+  </g>
+</svg>

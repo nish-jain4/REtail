@@ -1,0 +1,1 @@
+alert_id,product_id,product_name,stock_quantity,reorder_level,critical_level,severity,status,notification_channel,notification_status,notification_error,transaction_id,created_at,resolved_at

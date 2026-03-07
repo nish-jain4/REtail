@@ -107,7 +107,7 @@ PRODUCT_IMPORT_COLUMNS = {
 PAYPAL_CLIENT_ID = "AT4YjVQk1fNnJTW1sdd7KRMlB5OVYTBAuKh4dFp76BUiAmLiqbPP8VlJmrZhhZb5-w_0fRzNQG3BLTrw"
 PAYPAL_CLIENT_SECRET = "EDumKbVywv9AnZGKWHwCtl9o9UkEpMO_6hVbvuxk64_bbxEu303Se5pTEJAiy0KpOy4dX2G6R7rldyPa"
 PAYPAL_BASE_URL = os.getenv("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com").strip()
-PAYMENT_CURRENCY = os.getenv("PAYMENT_CURRENCY", "USD").strip().upper() or "USD"
+PAYMENT_CURRENCY = os.getenv("PAYMENT_CURRENCY", "INR").strip().upper() or "INR"
 MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "quickbill").strip() or "quickbill"
 LOW_STOCK_DEFAULT_THRESHOLD = _env_int("LOW_STOCK_DEFAULT_THRESHOLD", 10)
@@ -826,8 +826,8 @@ def _create_paypal_order(
             "intent": "CAPTURE",
             "purchase_units": [
                 {
-                    "reference_id": f"quickbill-{uuid.uuid4().hex[:10]}",
-                    "description": f"QuickBill checkout for {customer_name}",
+                    "reference_id": f"retail-{uuid.uuid4().hex[:10]}",
+                    "description": f"REtail checkout for {customer_name}",
                     "amount": {
                         "currency_code": PAYMENT_CURRENCY,
                         "value": f"{total_amount:.2f}",
@@ -837,7 +837,7 @@ def _create_paypal_order(
             "payment_source": {
                 "paypal": {
                     "experience_context": {
-                        "brand_name": "QuickBill",
+                        "brand_name": "REtail",
                         "user_action": "PAY_NOW",
                         "return_url": return_url,
                         "cancel_url": cancel_url,

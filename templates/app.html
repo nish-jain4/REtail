@@ -3,41 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QuickBill - Retail Self Checkout</title>
+    <title>REtail - Retail Self Checkout</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body class="page-home">
+    <div class="home-bg-3d" aria-hidden="true">
+        <span class="home-orb home-orb-left"></span>
+        <span class="home-orb home-orb-right"></span>
+        <span class="home-orb home-orb-bottom"></span>
+        <span class="home-grid"></span>
+    </div>
     <header class="header compact home-header">
-        <a href="{{ url_for('index') }}" class="logo-wrap">
-            <img src="{{ url_for('static', filename='logo03.png') }}" alt="QuickBill" class="logo">
+        <a href="{{ url_for('index') }}" class="brand-retail home-brand" aria-label="REtail Home">
+            <img src="{{ url_for('static', filename='retail-logo.svg') }}" class="brand-logo" alt="" aria-hidden="true">
+            <span class="brand-name">REtail</span>
         </a>
         <nav class="nav home-nav">
             <a href="#about">About</a>
             <a href="#workflow">Workflow</a>
-            <a href="#team">Team</a>
+            <a href="#reviews">Reviews</a>
             <a href="#contact">Contact</a>
         </nav>
         <div class="home-header-cta">
             <a href="{{ url_for('form') }}" class="btn btn-secondary">Sign Up</a>
-            <a href="{{ url_for('customer') }}" class="btn btn-primary">Open Retail UI</a>
+            <a href="{{ url_for('customer') }}" class="btn btn-primary">Open REtail UI</a>
         </div>
     </header>
 
     <main class="home-shell">
         <section class="home-hero reveal">
             <div class="hero-copy">
-                <p class="hero-tag">QUEUE-FREE SHOPPING EXPERIENCE</p>
-                <h1>Scan, review, and pay your retail bill in one smooth flow.</h1>
+                <p class="hero-tag"><span class="hero-dot" aria-hidden="true"></span>Queue-Free Shopping Experience</p>
+                <h1>Scan, review, and <span>pay your retail bill</span> in one smooth flow.</h1>
                 <p>
-                    QuickBill turns every shopper into a fast self-checkout lane. Add items instantly,
+                    REtail turns every shopper into a fast self-checkout lane. Add items instantly,
                     view your live bill, and complete payment before reaching the exit.
                 </p>
                 <div class="hero-actions">
                     <a href="{{ url_for('customer') }}" class="btn btn-primary">Start Scanning</a>
-                    <a href="{{ url_for('form') }}" class="btn btn-secondary">Create Account</a>
+                    <a href="{{ url_for('form') }}" class="btn btn-secondary">Watch Demo</a>
                 </div>
                 <div class="hero-metrics">
                     <div class="metric-card tilt-card" data-tilt>
@@ -56,138 +63,259 @@
             </div>
 
             <div class="hero-visual tilt-card" data-tilt>
-                <div class="mock-frame">
-                    <div class="mock-top">
-                        <span>Retail</span>
-                        <small>Live Session</small>
-                    </div>
-                    <div class="mock-columns">
-                        <div class="mock-card">
-                            <h4>Recommendations</h4>
-                            <ul>
-                                <li>Coca-Cola</li>
-                                <li>Lays Chips</li>
-                                <li>Nutella</li>
-                            </ul>
-                        </div>
-                        <div class="mock-card center">
-                            <h4>Camera To Scan</h4>
-                            <div class="mock-scan">
-                                <div class="mock-beam"></div>
+                <div class="hero-scene">
+                    <span class="scene-dot dot-one"></span>
+                    <span class="scene-dot dot-two"></span>
+                    <div class="scene-phone" aria-hidden="true">
+                        <div class="phone-shell">
+                            <div class="phone-notch"></div>
+                            <div class="phone-screen">
+                                <div class="screen-slice slice-top"></div>
+                                <div class="screen-slice slice-mid"></div>
+                                <div class="screen-slice slice-bottom"></div>
+                                <div class="screen-shine"></div>
                             </div>
                         </div>
-                        <div class="mock-card">
-                            <h4>Bill</h4>
-                            <ul>
-                                <li>2 x Coke</li>
-                                <li>1 x Chips</li>
-                                <li>Total: INR 220</li>
-                            </ul>
-                        </div>
                     </div>
-                    <button class="mock-pay">Pay Bill</button>
+                    <div class="scene-card">
+                        <div class="scene-card-head">
+                            <span>REtail</span>
+                            <small>Live Session</small>
+                        </div>
+                        <div class="scene-card-columns">
+                            <div class="scene-list">
+                                <h4>Recommend</h4>
+                                <p>Coca-Cola</p>
+                                <p>Lays Chips</p>
+                                <p>Nutella</p>
+                            </div>
+                            <div class="scene-scan">
+                                <h4>Scan</h4>
+                                <div class="scene-scan-box">
+                                    <span></span>
+                                </div>
+                            </div>
+                            <div class="scene-list">
+                                <h4>Bill</h4>
+                                <p>2 x Coke</p>
+                                <p>1 x Chips</p>
+                                <p class="scene-total">INR 220</p>
+                            </div>
+                        </div>
+                        <button type="button" class="scene-pay">Pay Bill</button>
+                    </div>
+                    <div class="scene-floor" aria-hidden="true"></div>
                 </div>
             </div>
         </section>
 
-        <section id="about" class="home-section reveal">
+        <section id="about" class="home-section about-showcase reveal">
             <div class="section-head">
-                <h2>About QuickBill</h2>
+                <h2>About REtail</h2>
                 <p>Built for retail stores that want faster checkout without adding more counters.</p>
+                <p>Transform shopping experience with modern self-checkout flow.</p>
             </div>
-            <div class="about-grid">
-                <article class="glass-card tilt-card" data-tilt>
-                    <h3>Real-Time Billing</h3>
-                    <p>Every add-to-cart action updates the bill instantly so customers always see accurate totals.</p>
+            <div class="feature-grid">
+                <article class="feature-card">
+                    <span class="feature-icon">QR</span>
+                    <h3>Instant Scanning</h3>
+                    <p>Point your camera at any product code for quick recognition and automatic add-to-cart.</p>
                 </article>
-                <article class="glass-card tilt-card" data-tilt>
-                    <h3>Gateway Payments</h3>
-                    <p>PayPal Sandbox order creation and server-side capture keep payment flow secure.</p>
+                <article class="feature-card">
+                    <span class="feature-icon">M</span>
+                    <h3>Mobile-First Design</h3>
+                    <p>Built for the way people shop. Fast, clean interface optimized for phones and tablets.</p>
                 </article>
-                <article class="glass-card tilt-card" data-tilt>
-                    <h3>Store-Ready Logs</h3>
-                    <p>Successful transactions are stored for reporting and audit in your sales table.</p>
+                <article class="feature-card">
+                    <span class="feature-icon">$</span>
+                    <h3>Seamless Payments</h3>
+                    <p>Multiple checkout options with secure capture and instant bill confirmation.</p>
+                </article>
+                <article class="feature-card">
+                    <span class="feature-icon">T</span>
+                    <h3>Save Time</h3>
+                    <p>Skip checkout queues entirely and complete shopping faster with in-app billing.</p>
+                </article>
+                <article class="feature-card">
+                    <span class="feature-icon">AI</span>
+                    <h3>Smart Suggestions</h3>
+                    <p>Dynamic recommendations based on the current cart and popular products.</p>
+                </article>
+                <article class="feature-card">
+                    <span class="feature-icon">S</span>
+                    <h3>Secure and Private</h3>
+                    <p>End-to-end protection keeps payment and shopping activity safe.</p>
                 </article>
             </div>
         </section>
 
-        <section id="workflow" class="home-section reveal">
+        <section id="workflow" class="home-section workflow-showcase reveal">
             <div class="section-head">
                 <h2>How It Works</h2>
-                <p>Simple customer journey from entry to payment.</p>
+                <p>Three simple steps from item scan to payment confirmation.</p>
             </div>
-            <div class="workflow-row">
-                <div class="flow-card tilt-card" data-tilt>
-                    <span>01</span>
-                    <h3>Sign Up</h3>
-                    <p>Customer enters basic details and starts a shopping session.</p>
-                </div>
-                <div class="flow-card tilt-card" data-tilt>
-                    <span>02</span>
-                    <h3>Scan / Add Items</h3>
-                    <p>Items are added by barcode or product ID and reflected in live bill.</p>
-                </div>
-                <div class="flow-card tilt-card" data-tilt>
-                    <span>03</span>
-                    <h3>Pay Bill</h3>
-                    <p>Checkout opens PayPal Sandbox, captures payment, then confirms bill completion.</p>
-                </div>
+            <div class="workflow-mini-row">
+                <article class="flow-mini-card">
+                    <div class="flow-mini-top">
+                        <strong>01</strong>
+                        <span>Scan</span>
+                    </div>
+                    <h3>Scan Products</h3>
+                    <p>Open the app and scan item code with your phone or laptop camera.</p>
+                </article>
+                <article class="flow-mini-card">
+                    <div class="flow-mini-top">
+                        <strong>02</strong>
+                        <span>Review</span>
+                    </div>
+                    <h3>Review Cart</h3>
+                    <p>Check quantity, see recommendations, and remove any item in one click.</p>
+                </article>
+                <article class="flow-mini-card">
+                    <div class="flow-mini-top">
+                        <strong>03</strong>
+                        <span>Pay</span>
+                    </div>
+                    <h3>Pay and Go</h3>
+                    <p>Complete payment with your preferred method and walk out without waiting.</p>
+                </article>
+            </div>
+            <div class="workflow-action">
+                <a href="{{ url_for('customer') }}" class="btn btn-primary">Try It Now</a>
             </div>
         </section>
 
-        <section id="team" class="home-section reveal">
+        <section id="reviews" class="home-section testimonial-showcase reveal">
             <div class="section-head">
-                <h2>Meet The Team</h2>
+                <h2>Loved by Retailers and Shoppers</h2>
+                <p>See how stores are using REtail to speed up checkout every day.</p>
             </div>
-            <div class="team-grid">
-                <article class="team-card tilt-card" data-tilt>
-                    <img src="{{ url_for('static', filename='member01.jpg') }}" alt="Vanshika">
-                    <h3>Vanshika</h3>
-                    <p>Front-End Developer</p>
+            <div class="review-grid">
+                <article class="review-card">
+                    <p class="review-stars">***</p>
+                    <p>"Checkout time dropped sharply. Customers now pay faster and our staff can focus on service."</p>
+                    <div class="review-author">
+                        <span>PS</span>
+                        <div>
+                            <strong>Priya Sharma</strong>
+                            <small>Store Manager, SuperMart</small>
+                        </div>
+                    </div>
                 </article>
-                <article class="team-card tilt-card" data-tilt>
-                    <img src="{{ url_for('static', filename='member04.jpg') }}" alt="Nishtha">
-                    <h3>Nishtha</h3>
-                    <p>Project Manager</p>
+                <article class="review-card">
+                    <p class="review-stars">***</p>
+                    <p>"Quick setup and simple interface. Our team adopted REtail in days with almost no training."</p>
+                    <div class="review-author">
+                        <span>RC</span>
+                        <div>
+                            <strong>Rajat Chawla</strong>
+                            <small>Retail Operations Head</small>
+                        </div>
+                    </div>
                 </article>
-                <article class="team-card tilt-card" data-tilt>
-                    <img src="{{ url_for('static', filename='member01.jpg') }}" alt="Khushboo">
-                    <h3>Khushboo</h3>
-                    <p>Backend Developer</p>
-                </article>
-                <article class="team-card tilt-card" data-tilt>
-                    <img src="{{ url_for('static', filename='member04.jpg') }}" alt="Rudraksh Khanna">
-                    <h3>Rudraksh Khanna</h3>
-                    <p>Developer Operations</p>
+                <article class="review-card">
+                    <p class="review-stars">***</p>
+                    <p>"I scan, review, and pay quickly. This is much better than standing in line."</p>
+                    <div class="review-author">
+                        <span>AP</span>
+                        <div>
+                            <strong>Aryan Patel</strong>
+                            <small>Regular Shopper</small>
+                        </div>
+                    </div>
                 </article>
             </div>
         </section>
 
-        <section id="contact" class="home-contact reveal">
-            <div>
-                <h2>Need Store Integration Support?</h2>
-                <p>Contact us for setup, deployment, and scanner integration.</p>
+        <section id="contact" class="home-cta reveal">
+            <div class="cta-icon">QR</div>
+            <h2>Ready to Transform Your Retail Experience?</h2>
+            <p>Join stores using REtail to deliver faster checkout and smoother in-store journeys.</p>
+            <div class="cta-actions">
+                <a href="{{ url_for('customer') }}" class="btn btn-primary">Start Free Trial</a>
+                <a href="{{ url_for('form') }}" class="btn btn-secondary">Schedule Demo</a>
             </div>
-            <a href="mailto:support@quickbill.com" class="btn btn-primary">support@quickbill.com</a>
+            <small>No setup cost required to try the checkout flow.</small>
         </section>
     </main>
 
+    <footer class="home-footer">
+        <div class="footer-brand">
+            <a href="{{ url_for('index') }}" class="brand-retail" aria-label="REtail Home">
+                <img src="{{ url_for('static', filename='retail-logo.svg') }}" class="brand-logo" alt="" aria-hidden="true">
+                <span class="brand-name">REtail</span>
+            </a>
+            <p>Queue-free retail checkout with real-time scanning and digital billing.</p>
+        </div>
+        <div class="footer-links">
+            <div>
+                <h3>Product</h3>
+                <a href="#workflow">Workflow</a>
+                <a href="{{ url_for('customer') }}">Scanner UI</a>
+                <a href="{{ url_for('form') }}">Sign Up</a>
+            </div>
+            <div>
+                <h3>Company</h3>
+                <a href="#about">About</a>
+                <a href="#reviews">Reviews</a>
+                <a href="mailto:support@retail.com">Contact</a>
+            </div>
+            <div>
+                <h3>Legal</h3>
+                <a href="#">Privacy</a>
+                <a href="#">Terms</a>
+                <a href="#">Cookie Policy</a>
+            </div>
+        </div>
+    </footer>
+
     <script>
-        function enableTilt() {
-            if (window.matchMedia("(pointer: coarse)").matches) {
+        function useAdvancedMotion() {
+            const lowMotion = window.matchMedia("(pointer: coarse), (prefers-reduced-motion: reduce), (max-width: 1200px)").matches;
+            const lowCpu = (navigator.hardwareConcurrency || 4) < 8;
+            return !(lowMotion || lowCpu);
+        }
+
+        function initHomeParallax() {
+            if (!useAdvancedMotion()) {
                 return;
             }
-            document.querySelectorAll("[data-tilt]").forEach((card) => {
+
+            let rafId = null;
+            let latestX = 0;
+            let latestY = 0;
+
+            window.addEventListener("mousemove", (event) => {
+                latestX = event.clientX;
+                latestY = event.clientY;
+                if (rafId) {
+                    return;
+                }
+                rafId = window.requestAnimationFrame(() => {
+                    const ratioX = (latestX / window.innerWidth) - 0.5;
+                    const ratioY = (latestY / window.innerHeight) - 0.5;
+                    document.documentElement.style.setProperty("--home-tilt-x", `${(ratioY * -2.4).toFixed(2)}deg`);
+                    document.documentElement.style.setProperty("--home-tilt-y", `${(ratioX * 3.2).toFixed(2)}deg`);
+                    rafId = null;
+                });
+            });
+        }
+
+        function enableTilt() {
+            if (!useAdvancedMotion()) {
+                return;
+            }
+            document.querySelectorAll(".hero-visual[data-tilt], .metric-card[data-tilt]").forEach((card) => {
                 card.addEventListener("mousemove", (event) => {
                     const rect = card.getBoundingClientRect();
                     const x = event.clientX - rect.left;
                     const y = event.clientY - rect.top;
-                    const rotateX = ((y / rect.height) - 0.5) * -9;
-                    const rotateY = ((x / rect.width) - 0.5) * 9;
-                    card.style.transform = `perspective(1100px) rotateX(${rotateX.toFixed(2)}deg) rotateY(${rotateY.toFixed(2)}deg)`;
+                    const rotateX = ((y / rect.height) - 0.5) * -4;
+                    const rotateY = ((x / rect.width) - 0.5) * 4;
+                    card.style.transform = `perspective(900px) rotateX(${rotateX.toFixed(2)}deg) rotateY(${rotateY.toFixed(2)}deg)`;
                 });
                 card.addEventListener("mouseleave", () => {
-                    card.style.transform = "perspective(1100px) rotateX(0deg) rotateY(0deg)";
+                    card.style.transform = "perspective(900px) rotateX(0deg) rotateY(0deg)";
                 });
             });
         }
@@ -220,6 +348,7 @@
             document.querySelectorAll(".reveal").forEach((section) => observer.observe(section));
         }
 
+        initHomeParallax();
         enableTilt();
         startCounters();
         revealSections();
