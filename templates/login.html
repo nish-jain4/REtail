@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - QuickBill</title>
+    <title>Login - REtail Stock</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -39,8 +39,9 @@
 </head>
 <body class="page-form">
     <header class="header compact">
-        <a href="{{ url_for('index') }}" class="logo-wrap">
-            <img src="{{ url_for('static', filename='logo03.png') }}" alt="QuickBill" class="logo">
+        <a href="{{ url_for('index') }}" class="brand-retail" aria-label="REtail Stock Home">
+            <img src="{{ url_for('static', filename='retail-logo.svg') }}" class="brand-logo" alt="" aria-hidden="true">
+            <span class="brand-name">REtail Stock</span>
         </a>
         <nav class="nav">
             <a href="{{ url_for('index') }}">Home</a>
@@ -54,7 +55,7 @@
     <main class="form-main">
         <div class="form-card">
             <h1>User Login</h1>
-            <p class="form-desc">User login opens the billing page with scanner and camera. Admin access now uses a separate secret-key URL.</p>
+            <p class="form-desc">Use the same login form for both customer and admin. Admin login needs email, password, and secret key.</p>
 
             <section class="login-option active">
                 <div>
@@ -69,9 +70,12 @@
                     <label for="userPassword">Password</label>
                     <input type="password" id="userPassword" name="password" required placeholder="Enter your password">
 
+                    <label for="secretKey">Secret Key (Admin only)</label>
+                    <input type="password" id="secretKey" name="secret_key" placeholder="Required for admin login only">
+
                     <div class="form-error" role="alert" aria-live="polite">{{ error_message }}</div>
 
-                    <button type="submit" class="btn btn-primary btn-full">Login as User</button>
+                    <button type="submit" class="btn btn-primary btn-full">Login</button>
                 </form>
             </section>
 

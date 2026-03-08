@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - QuickBill</title>
+    <title>Register - REtail Stock</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -11,8 +11,9 @@
 </head>
 <body class="page-form">
     <header class="header compact">
-        <a href="{{ url_for('index') }}" class="logo-wrap">
-            <img src="{{ url_for('static', filename='logo03.png') }}" alt="QuickBill" class="logo">
+        <a href="{{ url_for('index') }}" class="brand-retail" aria-label="REtail Stock Home">
+            <img src="{{ url_for('static', filename='retail-logo.svg') }}" class="brand-logo" alt="" aria-hidden="true">
+            <span class="brand-name">REtail Stock</span>
         </a>
         <nav class="nav">
             <a href="{{ url_for('index') }}">Home</a>

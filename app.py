@@ -8,7 +8,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -125,32 +125,34 @@ if PAYPAL_CURRENCY == "INR":
 INR_PER_USD = _env_float("INR_PER_USD", 83.0)
 if INR_PER_USD <= 0:
     INR_PER_USD = 83.0
-# Hardcoded Atlas connection (as requested).
-MONGODB_URI = "mongodb+srv://khushboobansal792_db_user:HSZ3tUPwaCxmuymF@cluster0.2iojd1s.mongodb.net/?retryWrites=true&w=majority"
-MONGODB_DB_NAME = "retail"
+DEFAULT_MONGODB_URI = "mongodb+srv://khushboobansal792_db_user:HSZ3tUPwaCxmuymF@cluster0.2iojd1s.mongodb.net/"
+DEFAULT_MONGODB_DB_NAME = "retail"
+MONGODB_URI = os.getenv("MONGODB_URI", DEFAULT_MONGODB_URI).strip() or DEFAULT_MONGODB_URI
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", DEFAULT_MONGODB_DB_NAME).strip() or DEFAULT_MONGODB_DB_NAME
+# Prefix prevents collisions with Admin collections inside the same database.
+MONGODB_COLLECTION_PREFIX = os.getenv("MONGODB_COLLECTION_PREFIX", "retail_").strip()
 LOW_STOCK_DEFAULT_THRESHOLD = _env_int("LOW_STOCK_DEFAULT_THRESHOLD", 10)
 CRITICAL_STOCK_DEFAULT_THRESHOLD = _env_int("CRITICAL_STOCK_DEFAULT_THRESHOLD", 3)
 LOW_STOCK_ALERT_COOLDOWN_MINUTES = _env_int("LOW_STOCK_ALERT_COOLDOWN_MINUTES", 180)
 TELEGRAM_BOT_TOKEN = "8541759344:AAFhR2fS1s8OQiOeNmgRDKj91Nc5c0jYthU"
 TELEGRAM_ADMIN_CHAT_ID = "2092635206"
 ADMIN_DASHBOARD_SECRET_KEY = "retail-admin-2026"
+ADMIN_LOGIN_EMAIL = os.getenv("ADMIN_LOGIN_EMAIL", "admin@retail.local").strip().lower()
+ADMIN_LOGIN_PASSWORD = os.getenv("ADMIN_LOGIN_PASSWORD", "Admin@Retail2026").strip()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "quickbill-dev-secret")
 
 mongo_client: MongoClient | None = None
 mongo_db = None
-MONGO_META_COLLECTION = "app_metadata"
-MONGO_MIGRATION_META_ID = "local_file_migration_v1"
 
 
 def _init_mongodb() -> None:
     global mongo_client, mongo_db
     if not PYMONGO_AVAILABLE:
-        print("[db] pymongo is not installed, using file storage fallback.")
-        return
+        raise RuntimeError("pymongo is required. Install dependencies from Retail/require.txt.")
     if not MONGODB_URI:
-        return
+        raise RuntimeError("MONGODB_URI is required.")
     try:
         mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=2500)
         mongo_client.admin.command("ping")
@@ -159,7 +161,7 @@ def _init_mongodb() -> None:
     except PyMongoError as exc:
         mongo_client = None
         mongo_db = None
-        print(f"[db] MongoDB unavailable, using file storage fallback. Reason: {exc}")
+        raise RuntimeError(f"[db] MongoDB connection failed for {MONGODB_DB_NAME}. Reason: {exc}") from exc
 
 
 def _using_mongodb() -> bool:
@@ -167,6 +169,11 @@ def _using_mongodb() -> bool:
 
 
 # ---------- Generic parsing + table I/O helpers ----------
+def _collection_name(table_name: str) -> str:
+    prefix = MONGODB_COLLECTION_PREFIX
+    return f"{prefix}{table_name}" if prefix else table_name
+
+
 def _table_paths(table_name: str) -> tuple[Path, Path]:
     return BASE_DIR / f"{table_name}.xlsx", BASE_DIR / f"{table_name}.csv"
 
@@ -252,50 +259,72 @@ def _write_rows_xlsx(path: Path, rows: list[dict[str, Any]], columns: list[str])
     workbook.save(path)
 
 
-def _read_table(table_name: str) -> list[dict[str, Any]]:
-    if _using_mongodb():
-        try:
-            rows = list(mongo_db[table_name].find({}, {"_id": 0}))
-            return [dict(row) for row in rows]
-        except PyMongoError as exc:
-            print(f"[db] read failed for {table_name}, falling back to files. Reason: {exc}")
-
+def _read_local_table_rows(table_name: str) -> list[dict[str, Any]]:
     xlsx_path, csv_path = _table_paths(table_name)
-
     if xlsx_path.exists() and OPENPYXL_AVAILABLE:
         return _read_rows_xlsx(xlsx_path)
-
     if csv_path.exists():
         return _read_rows_csv(csv_path)
-
-    if xlsx_path.exists():
-        # xlsx exists but openpyxl is missing
-        return []
-
+    if xlsx_path.exists() and not OPENPYXL_AVAILABLE:
+        print(f"[db] Cannot migrate {table_name} from xlsx because openpyxl is unavailable.")
     return []
 
 
-def _write_table(table_name: str, rows: list[dict[str, Any]]) -> None:
-    columns = TABLE_COLUMNS[table_name]
-
-    if _using_mongodb():
-        try:
-            collection = mongo_db[table_name]
-            collection.delete_many({})
-            if rows:
-                sanitized_rows = [{column: row.get(column, "") for column in columns} for row in rows]
-                collection.insert_many(sanitized_rows)
-            return
-        except PyMongoError as exc:
-            print(f"[db] write failed for {table_name}, falling back to files. Reason: {exc}")
-
-    xlsx_path, csv_path = _table_paths(table_name)
-
-    if OPENPYXL_AVAILABLE:
-        _write_rows_xlsx(xlsx_path, rows, columns)
+def _seed_table_from_local(
+    table_name: str,
+    canonicalizer: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
+) -> None:
+    if not _using_mongodb():
         return
 
-    _write_rows_csv(csv_path, rows, columns)
+    collection = mongo_db[_collection_name(table_name)]
+    try:
+        if collection.count_documents({}, limit=1) > 0:
+            return
+    except PyMongoError as exc:
+        raise RuntimeError(f"[db] Failed checking existing data for {table_name}. Reason: {exc}") from exc
+
+    local_rows = _read_local_table_rows(table_name)
+    if not local_rows:
+        return
+
+    columns = TABLE_COLUMNS[table_name]
+    prepared_rows: list[dict[str, Any]] = []
+    for row in local_rows:
+        candidate = canonicalizer(row) if canonicalizer is not None else row
+        if candidate is None:
+            continue
+        prepared_rows.append({column: candidate.get(column, "") for column in columns})
+
+    if not prepared_rows:
+        return
+
+    _write_table(table_name, prepared_rows)
+    print(f"[db] Migrated {len(prepared_rows)} row(s) from local {table_name} into MongoDB.")
+
+
+def _read_table(table_name: str) -> list[dict[str, Any]]:
+    if not _using_mongodb():
+        raise RuntimeError("[db] MongoDB is not initialized.")
+    try:
+        rows = list(mongo_db[_collection_name(table_name)].find({}, {"_id": 0}))
+        return [dict(row) for row in rows]
+    except PyMongoError as exc:
+        raise RuntimeError(f"[db] Read failed for {table_name}. Reason: {exc}") from exc
+
+
+def _write_table(table_name: str, rows: list[dict[str, Any]]) -> None:
+    if not _using_mongodb():
+        raise RuntimeError("[db] MongoDB is not initialized.")
+    columns = TABLE_COLUMNS[table_name]
+    try:
+        collection = mongo_db[_collection_name(table_name)]
+        collection.delete_many({})
+        if rows:
+            sanitized_rows = [{column: row.get(column, "") for column in columns} for row in rows]
+            collection.insert_many(sanitized_rows)
+    except PyMongoError as exc:
+        raise RuntimeError(f"[db] Write failed for {table_name}. Reason: {exc}") from exc
 
 
 def _normalize_phone(phone: str) -> str:
@@ -439,6 +468,22 @@ def _admin_secret_matches(secret_key: str) -> bool:
     return hmac.compare_digest(candidate, expected)
 
 
+def _admin_login_matches(email: str, password: str) -> bool:
+    normalized_email = str(email or "").strip().lower()
+    candidate_password = str(password or "")
+    if not normalized_email or not candidate_password:
+        return False
+
+    expected_email = str(ADMIN_LOGIN_EMAIL or "").strip().lower()
+    expected_password = str(ADMIN_LOGIN_PASSWORD or "")
+    if not expected_email or not expected_password:
+        return False
+
+    email_matches = hmac.compare_digest(normalized_email, expected_email)
+    password_matches = hmac.compare_digest(candidate_password, expected_password)
+    return email_matches and password_matches
+
+
 def _is_admin_authenticated() -> bool:
     return str(session.get("auth_role", "")).strip().lower() == "admin"
 
@@ -508,35 +553,39 @@ def _canonical_product_row(row: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _bootstrap_products_table() -> None:
-    products_xlsx, products_csv = _table_paths("products_database")
-    if OPENPYXL_AVAILABLE:
-        if products_xlsx.exists() or products_csv.exists():
-            return
-    else:
-        if products_csv.exists():
-            return
+    existing_products = _read_table("products_database")
+    if existing_products:
+        return
 
-    source_csv = BASE_DIR / "products.csv"
     rows: list[dict[str, Any]] = []
-    if source_csv.exists():
-        imported_rows = _read_rows_csv(source_csv)
-        for imported_row in imported_rows:
-            canonical = _canonical_product_row(imported_row)
-            if canonical is not None:
-                rows.append(canonical)
+    imported_rows = _read_local_table_rows("products_database")
+
+    if not imported_rows:
+        source_csv = BASE_DIR / "products.csv"
+        if source_csv.exists():
+            imported_rows = _read_rows_csv(source_csv)
+
+    for imported_row in imported_rows:
+        canonical = _canonical_product_row(imported_row)
+        if canonical is not None:
+            rows.append(canonical)
 
     _write_table("products_database", rows)
+    if rows:
+        print(f"[db] Migrated {len(rows)} product row(s) into MongoDB.")
 
 
 def _ensure_tables() -> None:
+    _seed_table_from_local("users", _canonical_user_row)
+    _seed_table_from_local("user_cart")
+    _seed_table_from_local("store_sales")
+    _seed_table_from_local("inventory_alerts")
+    _seed_table_from_local("inventory_movements")
+
     for table_name in ("users", "user_cart", "store_sales", "inventory_alerts", "inventory_movements"):
-        table_xlsx, table_csv = _table_paths(table_name)
-        if OPENPYXL_AVAILABLE:
-            if not table_xlsx.exists() and not table_csv.exists():
-                _write_table(table_name, [])
-        else:
-            if not table_csv.exists():
-                _write_table(table_name, [])
+        if not _read_table(table_name):
+            _write_table(table_name, [])
+
     _bootstrap_products_table()
 
 
@@ -585,6 +634,44 @@ def _build_product_index(products: list[dict[str, Any]]) -> dict[str, dict[str, 
         if product_name:
             index[product_name] = product
     return index
+
+
+def _category_key(value: Any) -> str:
+    return _product_lookup_key(value)
+
+
+def _category_price(products: list[dict[str, Any]], category_name: str) -> float | None:
+    lookup = _category_key(category_name)
+    if not lookup:
+        return None
+    for product in products:
+        if _category_key(product.get("product_name")) == lookup:
+            return round(_to_float(product.get("price", 0.0), 0.0), 2)
+    return None
+
+
+def _category_catalog(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    catalog: dict[str, dict[str, Any]] = {}
+    for product in products:
+        category_name = str(product.get("product_name", "")).strip() or "Uncategorized"
+        category_lookup = _category_key(category_name)
+        if not category_lookup:
+            continue
+
+        category = catalog.get(category_lookup)
+        if category is None:
+            category = {
+                "category_name": category_name,
+                "price": round(_to_float(product.get("price", 0.0), 0.0), 2),
+                "barcode_count": 0,
+                "in_stock_units": 0,
+            }
+            catalog[category_lookup] = category
+
+        category["barcode_count"] += 1
+        category["in_stock_units"] += max(_to_int(product.get("stock_quantity", 0), 0), 0)
+
+    return sorted(catalog.values(), key=lambda row: str(row.get("category_name", "")).lower())
 
 
 def _stock_alert_severity(product: dict[str, Any]) -> str:
@@ -910,6 +997,7 @@ def _dashboard_context() -> dict[str, Any]:
         "total_revenue": total_revenue,
         "registered_users": len([user for user in users if str(user.get("Role", "")).strip().lower() == "customer"]),
         "open_alerts": _read_table("inventory_alerts"),
+        "category_catalog": _category_catalog(products),
     }
 
 
@@ -923,13 +1011,18 @@ def _add_product_record(
 ) -> str | None:
     products = _load_products()
     normalized_product_id = _product_lookup_key(product_id)
-    normalized_name = _product_lookup_key(product_name)
 
     for product in products:
         if _product_lookup_key(product.get("product_id")) == normalized_product_id:
             return f"Product id {product_id} already exists."
-        if _product_lookup_key(product.get("product_name")) == normalized_name:
-            return f"Product {product_name} already exists."
+
+    rounded_price = round(price, 2)
+    existing_category_price = _category_price(products, product_name)
+    if existing_category_price is not None and abs(rounded_price - existing_category_price) > 0.009:
+        return (
+            f"Category {product_name} already has price {existing_category_price:.2f}. "
+            "Use the same price for all barcodes in this category."
+        )
 
     reorder_level = max(reorder_level, 0)
     critical_level = max(min(critical_level, reorder_level), 0)
@@ -938,7 +1031,7 @@ def _add_product_record(
             "product_id": product_id,
             "product_name": product_name,
             "stock_quantity": max(stock_quantity, 0),
-            "price": round(price, 2),
+            "price": rounded_price,
             "last_restock_date": _utc_now_iso(),
             "reorder_level": reorder_level,
             "critical_level": critical_level,
@@ -1250,20 +1343,31 @@ def login():
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-        user = _find_user_by_email(email)
-        if user is None or not _password_matches(str(user.get("Password Hash", "")), password):
-            error_message = "Invalid user email or password."
+        secret_key = request.form.get("secret_key", "").strip()
+
+        # Admin login requires all 3 factors: admin id + password + secret key.
+        if _admin_login_matches(email, password):
+            if not _admin_secret_matches(secret_key):
+                error_message = "Invalid admin secret key."
+            else:
+                session.clear()
+                _login_admin_session()
+                return redirect(url_for("admin_dashboard"))
         else:
-            users = _load_users()
-            for row in users:
-                if str(row.get("user_id", "")).strip() == str(user.get("user_id", "")).strip():
-                    row["last_login_at"] = _utc_now_iso()
-                    user = row
-                    break
-            _save_users(users)
-            session.clear()
-            _login_user_session(user)
-            return redirect(url_for("customer"))
+            user = _find_user_by_email(email)
+            if user is None or not _password_matches(str(user.get("Password Hash", "")), password):
+                error_message = "Invalid user email or password."
+            else:
+                users = _load_users()
+                for row in users:
+                    if str(row.get("user_id", "")).strip() == str(user.get("user_id", "")).strip():
+                        row["last_login_at"] = _utc_now_iso()
+                        user = row
+                        break
+                _save_users(users)
+                session.clear()
+                _login_user_session(user)
+                return redirect(url_for("customer"))
 
     return render_template(
         "login.html",
@@ -1379,22 +1483,6 @@ def admin_dashboard():
     )
 
 
-@app.route("/admin/dashboard-data")
-def admin_dashboard_data():
-    if not _is_admin_authenticated():
-        return jsonify({"error": "Admin login required."}), 403
-
-    dashboard = _dashboard_context()
-    dashboard["open_alerts"] = [
-        alert for alert in dashboard["open_alerts"] if str(alert.get("status", "")).strip().lower() == "open"
-    ]
-    dashboard["open_alerts"].sort(
-        key=lambda alert: _parse_iso_datetime(alert.get("created_at", "")) or datetime.min.replace(tzinfo=timezone.utc),
-        reverse=True,
-    )
-    return jsonify({"dashboard": dashboard, "generated_at": _utc_now_iso()})
-
-
 @app.route("/admin/products/add", methods=["POST"])
 def admin_add_product():
     if not _is_admin_authenticated():
@@ -1425,6 +1513,56 @@ def admin_add_product():
         return redirect(url_for("admin_dashboard", message=error_message))
 
     return redirect(url_for("admin_dashboard", message="Product added successfully."))
+
+
+@app.route("/admin/products/scan-add", methods=["POST"])
+def admin_scan_add_product():
+    if not _is_admin_authenticated():
+        return redirect(url_for("index"))
+
+    barcode = request.form.get("barcode", "").strip() or request.form.get("product_id", "").strip()
+    category_name = request.form.get("category_name", "").strip() or request.form.get("product_name", "").strip()
+    raw_price = request.form.get("price", "").strip()
+
+    if not barcode or not category_name:
+        return redirect(url_for("admin_dashboard", message="Barcode and category are required."))
+
+    products = _load_products()
+    category_price = _category_price(products, category_name)
+    if raw_price:
+        price = _to_float(raw_price, -1.0)
+        if price < 0:
+            return redirect(url_for("admin_dashboard", message="Price must be zero or greater."))
+    elif category_price is not None:
+        price = category_price
+    else:
+        return redirect(url_for("admin_dashboard", message="Price is required for a new category."))
+
+    if category_price is not None and abs(round(price, 2) - category_price) > 0.009:
+        return redirect(
+            url_for(
+                "admin_dashboard",
+                message=f"Category {category_name} already uses price {category_price:.2f}.",
+            )
+        )
+
+    error_message = _add_product_record(
+        product_id=barcode,
+        product_name=category_name,
+        stock_quantity=1,
+        price=price,
+        reorder_level=0,
+        critical_level=0,
+    )
+    if error_message:
+        return redirect(url_for("admin_dashboard", message=error_message))
+
+    return redirect(
+        url_for(
+            "admin_dashboard",
+            message=f"Barcode {barcode} added to category {category_name} at price {round(price, 2):.2f}.",
+        )
+    )
 
 
 @app.route("/admin/inventory-alerts")
@@ -1530,13 +1668,15 @@ def get_items():
 @app.route("/recommendations")
 def recommendations():
     products = _load_products()
+    category_items = _category_catalog(products)
     items = [
         {
-            "product_id": product["product_id"],
-            "name": product["product_name"],
-            "price": product["price"],
+            "product_id": category["category_name"],
+            "name": category["category_name"],
+            "price": category["price"],
+            "available_units": category["in_stock_units"],
         }
-        for product in products[:8]
+        for category in category_items[:8]
     ]
     return jsonify({"items": items})
 
@@ -1558,18 +1698,42 @@ def add_item():
             product
             for product in products
             if str(product["product_id"]).strip().lower() == normalized_product_id
-            or str(product["product_name"]).strip().lower() == normalized_product_id
         ),
         None,
     )
+    matched_by_category = False
+
+    cart_items = _load_cart_items()
+    if product_match is None:
+        matched_by_category = True
+        if quantity != 1:
+            return jsonify({"error": "Category add supports quantity 1. Scan each unique barcode separately."}), 400
+
+        category_candidates = [
+            product
+            for product in products
+            if str(product.get("product_name", "")).strip().lower() == normalized_product_id
+        ]
+        for candidate in category_candidates:
+            available_stock = _to_int(candidate.get("stock_quantity", 0), 0)
+            reserved_quantity = sum(
+                _to_int(item.get("quantity", 0), 0)
+                for item in cart_items
+                if _product_lookup_key(item.get("product_id")) == _product_lookup_key(candidate["product_id"])
+            )
+            if reserved_quantity < available_stock:
+                product_match = candidate
+                break
+
     if product_match is None:
         return jsonify({"error": f"Product {product_id} not found."}), 404
 
     available_stock = _to_int(product_match.get("stock_quantity", 0), 0)
     if available_stock <= 0:
+        if matched_by_category:
+            return jsonify({"error": f"Category {product_id} is out of stock."}), 400
         return jsonify({"error": f"{product_match['product_name']} is out of stock."}), 400
 
-    cart_items = _load_cart_items()
     reserved_quantity = sum(
         _to_int(item.get("quantity", 0), 0)
         for item in cart_items
