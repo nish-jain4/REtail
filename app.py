@@ -1316,7 +1316,7 @@ def _finalize_paypal_payment(order_id: str, capture: dict[str, Any]) -> None:
 @app.route("/")
 def index():
     return render_template(
-        "app.html",
+        "index.html",
         current_user=_current_user(),
         is_admin_authenticated=_is_admin_authenticated(),
     )

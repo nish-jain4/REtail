@@ -14,7 +14,7 @@ if not os.path.exists(EXCEL_FILE):
 # 📌 Home Page → Uses `main.html`
 @app.route('/')
 def main():
-    return render_template('app.html')
+    return render_template('index.html')
 @app.route('/customer')
 def customer():
     return render_template('customer.html')

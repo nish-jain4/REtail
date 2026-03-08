@@ -13,7 +13,7 @@ if not os.path.exists(EXCEL_FILE):
 
 @app.route("/")
 def index():
-    return render_template("app.html")  # Main page of the site
+    return render_template("index.html")  # Main page of the site
 
 @app.route("/customer")
 def customer():
