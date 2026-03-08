@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
     <style>
         .admin-shell {
             width: min(1280px, 95vw);
@@ -530,6 +531,8 @@
         let stockScanBusy = false;
         let lastDetectedCode = "";
         let lastDetectedAt = 0;
+        let lastFallbackAttemptAt = 0;
+        const FALLBACK_INTERVAL_MS = 420;
         const fallbackCanvas = document.createElement("canvas");
         const fallbackContext = fallbackCanvas.getContext("2d", { willReadFrequently: true });
 
@@ -565,6 +568,45 @@
             }
         }
 
+        async function detectWithQuagga(width, height) {
+            if (!window.Quagga || !fallbackContext || width < 2 || height < 2) {
+                return "";
+            }
+
+            fallbackCanvas.width = width;
+            fallbackCanvas.height = height;
+            fallbackContext.drawImage(stockScannerVideo, 0, 0, width, height);
+            const src = fallbackCanvas.toDataURL("image/jpeg", 0.85);
+
+            return await new Promise((resolve) => {
+                window.Quagga.decodeSingle(
+                    {
+                        src: src,
+                        numOfWorkers: 0,
+                        locate: true,
+                        inputStream: { size: 800 },
+                        decoder: {
+                            readers: [
+                                "ean_reader",
+                                "ean_8_reader",
+                                "upc_reader",
+                                "upc_e_reader",
+                                "code_128_reader",
+                                "code_39_reader",
+                                "codabar_reader"
+                            ]
+                        }
+                    },
+                    (result) => {
+                        const code = result && result.codeResult && result.codeResult.code
+                            ? String(result.codeResult.code).trim()
+                            : "";
+                        resolve(code);
+                    }
+                );
+            });
+        }
+
         async function stockScanLoop() {
             if (!stockScannerActive) {
                 return;
@@ -579,19 +621,39 @@
                         if (detections && detections.length) {
                             value = String(detections[0].rawValue || "").trim();
                         }
-                    } else if (stockScannerMode === "jsqr_fallback" && window.jsQR && fallbackContext) {
-                        const width = stockScannerVideo.videoWidth || 0;
-                        const height = stockScannerVideo.videoHeight || 0;
-                        if (width > 1 && height > 1) {
-                            fallbackCanvas.width = width;
-                            fallbackCanvas.height = height;
-                            fallbackContext.drawImage(stockScannerVideo, 0, 0, width, height);
-                            const frame = fallbackContext.getImageData(0, 0, width, height);
-                            const code = window.jsQR(frame.data, frame.width, frame.height, {
-                                inversionAttempts: "attemptBoth"
-                            });
-                            if (code && code.data) {
-                                value = String(code.data).trim();
+                    } else {
+                        const now = Date.now();
+                        if (now - lastFallbackAttemptAt >= FALLBACK_INTERVAL_MS) {
+                            lastFallbackAttemptAt = now;
+                            const width = stockScannerVideo.videoWidth || 0;
+                            const height = stockScannerVideo.videoHeight || 0;
+                            if (stockScannerMode === "quagga_fallback") {
+                                value = await detectWithQuagga(width, height);
+                            } else if (stockScannerMode === "quagga_jsqr_fallback") {
+                                value = await detectWithQuagga(width, height);
+                                if (!value && window.jsQR && fallbackContext && width > 1 && height > 1) {
+                                    fallbackCanvas.width = width;
+                                    fallbackCanvas.height = height;
+                                    fallbackContext.drawImage(stockScannerVideo, 0, 0, width, height);
+                                    const frame = fallbackContext.getImageData(0, 0, width, height);
+                                    const code = window.jsQR(frame.data, frame.width, frame.height, {
+                                        inversionAttempts: "attemptBoth"
+                                    });
+                                    if (code && code.data) {
+                                        value = String(code.data).trim();
+                                    }
+                                }
+                            } else if (stockScannerMode === "jsqr_fallback" && window.jsQR && fallbackContext && width > 1 && height > 1) {
+                                fallbackCanvas.width = width;
+                                fallbackCanvas.height = height;
+                                fallbackContext.drawImage(stockScannerVideo, 0, 0, width, height);
+                                const frame = fallbackContext.getImageData(0, 0, width, height);
+                                const code = window.jsQR(frame.data, frame.width, frame.height, {
+                                    inversionAttempts: "attemptBoth"
+                                });
+                                if (code && code.data) {
+                                    value = String(code.data).trim();
+                                }
                             }
                         }
                     }
@@ -628,7 +690,9 @@
 
             stockBarcodeDetector = await buildStockDetector();
             stockScannerMode = stockBarcodeDetector ? "barcode_detector" : "none";
-            if (stockScannerMode === "none" && window.jsQR && fallbackContext) {
+            if (stockScannerMode === "none" && window.Quagga) {
+                stockScannerMode = window.jsQR ? "quagga_jsqr_fallback" : "quagga_fallback";
+            } else if (stockScannerMode === "none" && window.jsQR && fallbackContext) {
                 stockScannerMode = "jsqr_fallback";
             }
             if (stockScannerMode === "none") {
@@ -651,8 +715,10 @@
                 toggleStockScannerBtn.textContent = "Stop Scanner";
                 if (stockScannerMode === "barcode_detector") {
                     setStockScannerStatus("Scanner active. Scan barcode/QR to auto-fill.", "ok");
+                } else if (stockScannerMode === "quagga_fallback" || stockScannerMode === "quagga_jsqr_fallback") {
+                    setStockScannerStatus("Fallback scanner active for barcode/QR.", "warn");
                 } else {
-                    setStockScannerStatus("QR fallback mode active. Barcode API not available.", "warn");
+                    setStockScannerStatus("QR-only fallback mode active.", "warn");
                 }
                 stockScanLoop();
             } catch (error) {

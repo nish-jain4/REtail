@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
     {% if paypal_client_id %}
     <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id | urlencode }}&currency={{ paypal_currency | urlencode }}&intent=capture"></script>
     {% endif %}
@@ -173,9 +174,11 @@
         let lastDetectedCode = "";
         let lastDetectedAt = 0;
         const DETECT_COOLDOWN_MS = 1600;
+        const FALLBACK_INTERVAL_MS = 420;
         const GST_RATE = 0.18;
         const fallbackCanvas = document.createElement("canvas");
         const fallbackContext = fallbackCanvas.getContext("2d", { willReadFrequently: true });
+        let lastFallbackAttemptAt = 0;
         let undoTimerId = null;
         let allRecommendations = [];
 
@@ -410,6 +413,45 @@
             }
         }
 
+        async function detectWithQuagga(width, height) {
+            if (!window.Quagga || !fallbackContext || width < 2 || height < 2) {
+                return "";
+            }
+
+            fallbackCanvas.width = width;
+            fallbackCanvas.height = height;
+            fallbackContext.drawImage(scannerVideo, 0, 0, width, height);
+            const src = fallbackCanvas.toDataURL("image/jpeg", 0.85);
+
+            return await new Promise((resolve) => {
+                window.Quagga.decodeSingle(
+                    {
+                        src: src,
+                        numOfWorkers: 0,
+                        locate: true,
+                        inputStream: { size: 800 },
+                        decoder: {
+                            readers: [
+                                "ean_reader",
+                                "ean_8_reader",
+                                "upc_reader",
+                                "upc_e_reader",
+                                "code_128_reader",
+                                "code_39_reader",
+                                "codabar_reader"
+                            ]
+                        }
+                    },
+                    (result) => {
+                        const code = result && result.codeResult && result.codeResult.code
+                            ? String(result.codeResult.code).trim()
+                            : "";
+                        resolve(code);
+                    }
+                );
+            });
+        }
+
         async function handleDetectedCode(rawValue) {
             const normalizedCode = normalizeScannedCode(rawValue);
             if (!normalizedCode) {
@@ -447,13 +489,26 @@
                 return barcodeDetector.detect(scannerVideo);
             }
 
-            if (detectorMode === "jsqr_fallback" && window.jsQR && fallbackContext) {
-                const width = scannerVideo.videoWidth || 0;
-                const height = scannerVideo.videoHeight || 0;
-                if (width < 2 || height < 2) {
-                    return [];
-                }
+            const now = Date.now();
+            if (now - lastFallbackAttemptAt < FALLBACK_INTERVAL_MS) {
+                return [];
+            }
+            lastFallbackAttemptAt = now;
 
+            const width = scannerVideo.videoWidth || 0;
+            const height = scannerVideo.videoHeight || 0;
+            if (width < 2 || height < 2) {
+                return [];
+            }
+
+            if (detectorMode === "quagga_fallback" || detectorMode === "quagga_jsqr_fallback") {
+                const quaggaCode = await detectWithQuagga(width, height);
+                if (quaggaCode) {
+                    return [{ rawValue: quaggaCode }];
+                }
+            }
+
+            if ((detectorMode === "jsqr_fallback" || detectorMode === "quagga_jsqr_fallback") && window.jsQR && fallbackContext) {
                 fallbackCanvas.width = width;
                 fallbackCanvas.height = height;
                 fallbackContext.drawImage(scannerVideo, 0, 0, width, height);
@@ -504,9 +559,10 @@
 
             barcodeDetector = await buildBarcodeDetector();
             detectorMode = barcodeDetector ? "barcode_detector" : "none";
-            if (!barcodeDetector && window.jsQR && fallbackContext) {
+            if (detectorMode === "none" && window.Quagga) {
+                detectorMode = window.jsQR ? "quagga_jsqr_fallback" : "quagga_fallback";
+            } else if (!barcodeDetector && window.jsQR && fallbackContext) {
                 detectorMode = "jsqr_fallback";
-                setScannerStatus("Using QR fallback scanner mode for this browser.", "warn");
             }
             if (detectorMode === "none") {
                 setScannerStatus("Scanner not supported. Use Chrome/Edge or keep manual product ID add.", "error");
@@ -529,8 +585,10 @@
                 toggleScannerBtn.textContent = "Stop Scanner";
                 if (detectorMode === "barcode_detector") {
                     setScannerStatus("Scanner active. Point barcode/QR to camera.", "ok");
+                } else if (detectorMode === "quagga_fallback" || detectorMode === "quagga_jsqr_fallback") {
+                    setScannerStatus("Fallback scanner active for barcode/QR.", "warn");
                 } else {
-                    setScannerStatus("Scanner active in QR fallback mode.", "ok");
+                    setScannerStatus("Scanner active in QR-only fallback mode.", "warn");
                 }
                 scanFrameLoop();
             } catch (error) {
